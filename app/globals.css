@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
 
 :root {
   --background: #ffffff;
@@ -12,15 +13,109 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.agent-page {
+  --border-color: #e4e4e7;
+  --muted-surface: #f4f4f5;
+  --muted-text: #52525b;
+  --link-color: #1d4ed8;
+}
+
+.agent-markdown {
+  color: #18181b;
+  line-height: 1.65;
+  font-size: 0.95rem;
+}
+
+.agent-markdown [data-streamdown="heading-1"],
+.agent-markdown [data-streamdown="heading-2"],
+.agent-markdown [data-streamdown="heading-3"],
+.agent-markdown [data-streamdown="heading-4"] {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.agent-markdown [data-streamdown="heading-1"] {
+  font-size: 1.4rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.35rem;
+}
+
+.agent-markdown [data-streamdown="heading-2"] {
+  font-size: 1.2rem;
+}
+
+.agent-markdown [data-streamdown="heading-3"] {
+  font-size: 1.05rem;
+}
+
+.agent-markdown [data-streamdown="paragraph"] {
+  margin: 0.5rem 0;
+}
+
+.agent-markdown [data-streamdown="ordered-list"],
+.agent-markdown [data-streamdown="unordered-list"] {
+  margin: 0.6rem 0 0.8rem 1.1rem;
+}
+
+.agent-markdown [data-streamdown="list-item"] {
+  margin: 0.2rem 0;
+}
+
+.agent-markdown [data-streamdown="blockquote"] {
+  margin: 0.8rem 0;
+  border-left: 3px solid var(--border-color);
+  padding-left: 0.8rem;
+  color: var(--muted-text);
+}
+
+.agent-markdown [data-streamdown="inline-code"] {
+  border: 1px solid var(--border-color);
+  border-radius: 0.35rem;
+  background: var(--muted-surface);
+  padding: 0.08rem 0.35rem;
+  font-size: 0.85em;
+}
+
+.agent-markdown [data-streamdown="code-block"] {
+  margin: 0.8rem 0;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: #fafafa;
+  overflow: auto;
+}
+
+.agent-markdown pre {
+  margin: 0;
+  padding: 0.9rem;
+}
+
+.agent-markdown [data-streamdown="table"] {
+  width: 100%;
+  margin: 0.8rem 0;
+  border-collapse: collapse;
+}
+
+.agent-markdown [data-streamdown="table"] th,
+.agent-markdown [data-streamdown="table"] td {
+  border: 1px solid var(--border-color);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.agent-markdown [data-streamdown="table"] th {
+  background: var(--muted-surface);
+}
+
+.agent-markdown [data-streamdown="link"] {
+  color: var(--link-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
