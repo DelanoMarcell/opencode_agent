@@ -195,6 +195,38 @@ body {
   border-color: var(--border-color) !important;
 }
 
+.agent-panel [data-slot="scroll-area-scrollbar"][data-orientation="vertical"],
+.agent-trace-panel [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  width: 0.5rem !important;
+  padding: 1px !important;
+  border-left: 0 !important;
+  background: rgba(20, 34, 51, 0.07);
+  opacity: 1 !important;
+}
+
+.agent-panel [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"],
+.agent-trace-panel [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
+  height: 0.5rem !important;
+  padding: 1px !important;
+  border-top: 0 !important;
+  background: rgba(20, 34, 51, 0.07);
+  opacity: 1 !important;
+}
+
+.agent-panel [data-slot="scroll-area-thumb"],
+.agent-trace-panel [data-slot="scroll-area-thumb"] {
+  background: #8ea0b2 !important;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+}
+
+.agent-panel [data-slot="scroll-area-scrollbar"]:hover [data-slot="scroll-area-thumb"],
+.agent-trace-panel
+  [data-slot="scroll-area-scrollbar"]:hover
+  [data-slot="scroll-area-thumb"] {
+  background: #6f89a7 !important;
+}
+
 .agent-markdown {
   color: var(--ink);
   line-height: 1.7;

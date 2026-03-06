@@ -429,7 +429,10 @@ export default function AgentPage() {
     {}
   );
   const [isBusy, setIsBusy] = useState(false);
-  const [showTrace, setShowTrace] = useState(true);
+  const [runUiPhase, setRunUiPhase] = useState<
+    "thinking" | "tool-active" | "assistant-output"
+  >("thinking");
+  const [showTrace, setShowTrace] = useState(false);
   const [activeModelKey, setActiveModelKey] = useState<string | null>(null);
   const [activeContextLimit, setActiveContextLimit] = useState<number | null>(null);
   const [sessionTokenTotals, setSessionTokenTotals] =
@@ -460,7 +463,7 @@ export default function AgentPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [timeline]);
+  }, [timeline, isBusy, runUiPhase]);
 
   useEffect(() => {
     if (!activeModelKey) {
@@ -822,6 +825,7 @@ export default function AgentPage() {
 
           if (typeof delta === "string" && delta.length > 0) {
             activeRun.assistantText += delta;
+            setRunUiPhase("assistant-output");
             appendAssistantTextChunk(part.id, delta, true);
             return;
           }
@@ -833,6 +837,7 @@ export default function AgentPage() {
 
           if (append.length > 0) {
             activeRun.assistantText += append;
+            setRunUiPhase("assistant-output");
             appendAssistantTextChunk(part.id, append, true);
           }
 
@@ -851,6 +856,10 @@ export default function AgentPage() {
             const previous = activeRun.toolCalls.get(String(part.callID ?? part.id));
             const next = toRuntimeToolCall(part, previous);
             activeRun.toolCalls.set(next.toolCallId, next);
+            const hasRunningToolCalls = [...activeRun.toolCalls.values()].some(
+              (toolCall) => toolCall.status === "pending" || toolCall.status === "running"
+            );
+            setRunUiPhase(hasRunningToolCalls ? "tool-active" : "thinking");
             upsertToolCard(next);
           }
 
@@ -1112,6 +1121,7 @@ export default function AgentPage() {
 
     setErrorText(null);
     setIsBusy(false);
+    setRunUiPhase("thinking");
 
     messageRoleByIDRef.current.clear();
     partTextSeenRef.current.clear();
@@ -1225,6 +1235,7 @@ export default function AgentPage() {
     appendUserCard(prompt);
 
     setIsBusy(true);
+    setRunUiPhase("thinking");
 
     try {
       const liveSessionID = await ensureSession();
@@ -1385,6 +1396,7 @@ export default function AgentPage() {
     setPendingPermissions([]);
     setQuestionDrafts({});
     setIsBusy(false);
+    setRunUiPhase("thinking");
     void loadSessionOptions();
   }, [loadSessionOptions, resetSessionTokenTracking]);
 
@@ -1422,6 +1434,7 @@ export default function AgentPage() {
           activeContextLimit
         )} (${(contextUsagePercent ?? 0).toFixed(1)}%)`
       : `${formatTokenCount(contextUsedEstimate)} / -`;
+  const showThinkingCard = isBusy && runUiPhase === "thinking";
 
   return (
     <main className="agent-page h-dvh overflow-hidden p-3 text-zinc-900 sm:p-4">
@@ -1511,7 +1524,7 @@ export default function AgentPage() {
           </CardHeader>
 
           <CardContent className="min-h-0 flex-1 px-0">
-            <ScrollArea className="h-full">
+            <ScrollArea type="always" className="h-full">
               <div className="space-y-4 px-4 py-4 sm:px-5">
                 {timeline.length === 0 ? (
                   <div className="agent-empty min-h-[320px] border-2 border-dashed p-6" />
@@ -1586,6 +1599,18 @@ export default function AgentPage() {
                     );
                   })
                 )}
+                {showThinkingCard ? (
+                  <article className="flex justify-start">
+                    <div className="agent-avatar mr-3 mt-1 grid size-8 shrink-0 place-items-center border-2 text-xs font-semibold">
+                      A
+                    </div>
+                    <div className="agent-card agent-card-assistant max-w-[90%] border-2 px-4 py-3 text-sm sm:max-w-[85%]">
+                      <p className="text-sm italic text-zinc-700 animate-pulse">
+                        Thinking...
+                      </p>
+                    </div>
+                  </article>
+                ) : null}
                 <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
@@ -1781,7 +1806,7 @@ export default function AgentPage() {
               </div>
             </CardHeader>
             <CardContent className="min-h-0 flex-1 p-0">
-              <ScrollArea className="h-full p-3 font-mono text-xs leading-relaxed">
+              <ScrollArea type="always" className="h-full p-3 font-mono text-xs leading-relaxed">
                 {traceLines.length === 0 ? (
                   <p className="text-zinc-500">Trace output appears here.</p>
                 ) : (
