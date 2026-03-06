@@ -26,11 +26,17 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -87,6 +93,33 @@ type SessionOption = {
   created: number;
 };
 
+type TokenUsageTotals = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+type StoredMessage = {
+  info: {
+    id: string;
+    role: string;
+    time: {
+      created: number;
+    };
+  } & Record<string, unknown>;
+  parts: Array<Part>;
+};
+
+const ZERO_TOKEN_USAGE: TokenUsageTotals = {
+  input: 0,
+  output: 0,
+  reasoning: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+};
+
 function normalizeEvent(event: StreamEvent): Event {
   return "payload" in event ? event.payload : event;
 }
@@ -111,6 +144,76 @@ function toCompactJSON(value: unknown, maxLength = 180): string {
   } catch {
     return String(value);
   }
+}
+
+function toTokenNumber(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function areTokenTotalsEqual(left: TokenUsageTotals, right: TokenUsageTotals): boolean {
+  return (
+    left.input === right.input &&
+    left.output === right.output &&
+    left.reasoning === right.reasoning &&
+    left.cacheRead === right.cacheRead &&
+    left.cacheWrite === right.cacheWrite
+  );
+}
+
+function sumTokenTotals(values: Iterable<TokenUsageTotals>): TokenUsageTotals {
+  const total = { ...ZERO_TOKEN_USAGE };
+  for (const value of values) {
+    total.input += value.input;
+    total.output += value.output;
+    total.reasoning += value.reasoning;
+    total.cacheRead += value.cacheRead;
+    total.cacheWrite += value.cacheWrite;
+  }
+  return total;
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(Math.max(0, Math.floor(value)));
+}
+
+function getModelKey(providerID: string, modelID: string): string {
+  return `${providerID}/${modelID}`;
+}
+
+function parseAssistantUsageFromInfo(info: Record<string, unknown>): {
+  messageID: string;
+  modelKey: string | null;
+  usage: TokenUsageTotals | null;
+} | null {
+  if (info.role !== "assistant") return null;
+  const messageID = typeof info.id === "string" ? info.id : null;
+  if (!messageID) return null;
+
+  const providerID = typeof info.providerID === "string" ? info.providerID : "";
+  const modelID = typeof info.modelID === "string" ? info.modelID : "";
+  const modelKey = providerID && modelID ? getModelKey(providerID, modelID) : null;
+
+  const tokens = info.tokens;
+  if (!tokens || typeof tokens !== "object") {
+    return { messageID, modelKey, usage: null };
+  }
+
+  const tokenRecord = tokens as Record<string, unknown>;
+  const cacheRecord =
+    tokenRecord.cache && typeof tokenRecord.cache === "object"
+      ? (tokenRecord.cache as Record<string, unknown>)
+      : undefined;
+
+  const usage: TokenUsageTotals = {
+    input: toTokenNumber(tokenRecord.input),
+    output: toTokenNumber(tokenRecord.output),
+    reasoning: toTokenNumber(tokenRecord.reasoning),
+    cacheRead: toTokenNumber(cacheRecord?.read),
+    cacheWrite: toTokenNumber(cacheRecord?.write),
+  };
+
+  return { messageID, modelKey, usage };
 }
 
 function parseQuestionAnswer(
@@ -327,6 +430,11 @@ export default function AgentPage() {
   );
   const [isBusy, setIsBusy] = useState(false);
   const [showTrace, setShowTrace] = useState(true);
+  const [activeModelKey, setActiveModelKey] = useState<string | null>(null);
+  const [activeContextLimit, setActiveContextLimit] = useState<number | null>(null);
+  const [sessionTokenTotals, setSessionTokenTotals] =
+    useState<TokenUsageTotals>(ZERO_TOKEN_USAGE);
+  const [modelLimitRevision, setModelLimitRevision] = useState(0);
 
   const configuredBaseURLRef = useRef<string | null>(null);
   const sessionIDRef = useRef<string | null>(null);
@@ -343,6 +451,8 @@ export default function AgentPage() {
   const activeAssistantServerMessageIDRef = useRef<string | null>(null);
   const activeRunRef = useRef<ActiveRun | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const assistantUsageByMessageIDRef = useRef<Map<string, TokenUsageTotals>>(new Map());
+  const modelContextLimitByKeyRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     sessionIDRef.current = sessionID;
@@ -351,6 +461,34 @@ export default function AgentPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [timeline]);
+
+  useEffect(() => {
+    if (!activeModelKey) {
+      setActiveContextLimit(null);
+      return;
+    }
+    setActiveContextLimit(modelContextLimitByKeyRef.current.get(activeModelKey) ?? null);
+  }, [activeModelKey, modelLimitRevision]);
+
+  const rebuildSessionTokenTotals = useCallback(() => {
+    setSessionTokenTotals(sumTokenTotals(assistantUsageByMessageIDRef.current.values()));
+  }, []);
+
+  const resetSessionTokenTracking = useCallback(() => {
+    assistantUsageByMessageIDRef.current.clear();
+    setSessionTokenTotals(ZERO_TOKEN_USAGE);
+    setActiveModelKey(null);
+  }, []);
+
+  const upsertAssistantUsage = useCallback(
+    (messageID: string, usage: TokenUsageTotals) => {
+      const previous = assistantUsageByMessageIDRef.current.get(messageID);
+      if (previous && areTokenTotalsEqual(previous, usage)) return;
+      assistantUsageByMessageIDRef.current.set(messageID, usage);
+      rebuildSessionTokenTotals();
+    },
+    [rebuildSessionTokenTotals]
+  );
 
   const appendTrace = useCallback((line: string) => {
     const time = new Date().toLocaleTimeString();
@@ -446,7 +584,7 @@ export default function AgentPage() {
   }, []);
 
   const buildTimelineFromStoredMessages = useCallback(
-    (storedMessages: Array<{ info: { id: string; role: string; time: { created: number } }; parts: Array<Part> }>) => {
+    (storedMessages: Array<StoredMessage>) => {
       const ordered = [...storedMessages].sort(
         (left, right) => left.info.time.created - right.info.time.created
       );
@@ -502,6 +640,30 @@ export default function AgentPage() {
     []
   );
 
+  const rebuildSessionUsageFromStoredMessages = useCallback(
+    (storedMessages: Array<StoredMessage>) => {
+      const ordered = [...storedMessages].sort(
+        (left, right) => left.info.time.created - right.info.time.created
+      );
+
+      assistantUsageByMessageIDRef.current.clear();
+      let nextModelKey: string | null = null;
+
+      for (const message of ordered) {
+        const snapshot = parseAssistantUsageFromInfo(message.info);
+        if (!snapshot) continue;
+        if (snapshot.modelKey) nextModelKey = snapshot.modelKey;
+        if (snapshot.usage) {
+          assistantUsageByMessageIDRef.current.set(snapshot.messageID, snapshot.usage);
+        }
+      }
+
+      setActiveModelKey(nextModelKey);
+      rebuildSessionTokenTotals();
+    },
+    [rebuildSessionTokenTotals]
+  );
+
   const ensureClients = useCallback(() => {
     if (sessionIDRef.current && configuredBaseURLRef.current !== baseUrl) {
       throw new Error(
@@ -520,7 +682,41 @@ export default function AgentPage() {
     v1ClientRef.current = createOpencodeClient({ baseUrl });
     v2ClientRef.current = createOpencodeClientV2({ baseUrl });
     configuredBaseURLRef.current = baseUrl;
+    modelContextLimitByKeyRef.current = new Map();
+    setModelLimitRevision((value) => value + 1);
   }, [baseUrl]);
+
+  const refreshModelContextLimits = useCallback(async () => {
+    try {
+      ensureClients();
+      const client = v1ClientRef.current;
+      if (!client) return;
+
+      const result = await client.provider.list();
+      if (result.error) {
+        const message = getAssistantError(result.error);
+        if (message) appendTrace(`provider metadata error: ${message}`);
+        return;
+      }
+
+      const nextLimits = new Map<string, number>();
+      for (const provider of result.data?.all ?? []) {
+        const providerID = provider.id;
+        const models = provider.models ?? {};
+
+        for (const model of Object.values(models)) {
+          const contextLimit = model.limit?.context;
+          if (typeof contextLimit !== "number" || !Number.isFinite(contextLimit)) continue;
+          nextLimits.set(getModelKey(providerID, model.id), Math.max(0, Math.floor(contextLimit)));
+        }
+      }
+
+      modelContextLimitByKeyRef.current = nextLimits;
+      setModelLimitRevision((value) => value + 1);
+    } catch (error) {
+      appendTrace(`provider metadata error: ${toErrorMessage(error)}`);
+    }
+  }, [appendTrace, ensureClients]);
 
   const refreshPendingInteractiveRequests = useCallback(async () => {
     if (pollingInteractiveRef.current) return;
@@ -590,6 +786,15 @@ export default function AgentPage() {
         messageRoleByIDRef.current.set(info.id, info.role);
         if (info.role === "assistant") {
           activeAssistantServerMessageIDRef.current = info.id;
+
+          const usageSnapshot = parseAssistantUsageFromInfo(info as Record<string, unknown>);
+          if (usageSnapshot?.modelKey) {
+            setActiveModelKey(usageSnapshot.modelKey);
+          }
+          if (usageSnapshot?.usage) {
+            upsertAssistantUsage(usageSnapshot.messageID, usageSnapshot.usage);
+          }
+
           if (activeRun && activeRun.sessionID === info.sessionID) {
             const provider = "providerID" in info ? String(info.providerID) : "unknown";
             const model = "modelID" in info ? String(info.modelID) : "unknown";
@@ -826,6 +1031,7 @@ export default function AgentPage() {
       getLatestAssistantText,
       markAssistantCardsComplete,
       refreshPendingInteractiveRequests,
+      upsertAssistantUsage,
       upsertToolCard,
     ]
   );
@@ -870,6 +1076,7 @@ export default function AgentPage() {
   const loadSessionOptions = useCallback(async () => {
     try {
       ensureClients();
+      void refreshModelContextLimits();
       const client = v1ClientRef.current;
       if (!client) return;
 
@@ -898,7 +1105,7 @@ export default function AgentPage() {
     } catch (error) {
       setErrorText(toErrorMessage(error));
     }
-  }, [ensureClients]);
+  }, [ensureClients, refreshModelContextLimits]);
 
   const resumeSession = useCallback(async () => {
     if (!selectedSessionID) return;
@@ -913,17 +1120,19 @@ export default function AgentPage() {
     openTextSegmentRef.current = null;
     activeAssistantServerMessageIDRef.current = null;
     activeRunRef.current = null;
+    resetSessionTokenTracking();
 
     try {
       ensureClients();
       await ensureEventStream();
+      await refreshModelContextLimits();
 
       const client = v1ClientRef.current;
       if (!client) throw new Error("OpenCode client is not initialized");
 
       const messagesResult = await client.session.messages({
         path: { id: selectedSessionID },
-        query: { limit: 200 },
+        query: { limit: 1000 },
       });
       if (messagesResult.error) {
         throw new Error(
@@ -931,7 +1140,9 @@ export default function AgentPage() {
         );
       }
 
-      const nextTimeline = buildTimelineFromStoredMessages(messagesResult.data ?? []);
+      const storedMessages = (messagesResult.data ?? []) as Array<StoredMessage>;
+      const nextTimeline = buildTimelineFromStoredMessages(storedMessages);
+      rebuildSessionUsageFromStoredMessages(storedMessages);
       setTimeline(nextTimeline);
       sessionIDRef.current = selectedSessionID;
       setSessionID(selectedSessionID);
@@ -945,18 +1156,23 @@ export default function AgentPage() {
   }, [
     appendTrace,
     buildTimelineFromStoredMessages,
+    rebuildSessionUsageFromStoredMessages,
     ensureClients,
     ensureEventStream,
+    refreshModelContextLimits,
     refreshPendingInteractiveRequests,
+    resetSessionTokenTracking,
     selectedSessionID,
   ]);
 
   useEffect(() => {
     void loadSessionOptions();
-  }, [loadSessionOptions]);
+    void refreshModelContextLimits();
+  }, [loadSessionOptions, refreshModelContextLimits]);
 
   const ensureSession = useCallback(async (): Promise<string> => {
     ensureClients();
+    void refreshModelContextLimits();
     await ensureEventStream();
 
     if (sessionIDRef.current) return sessionIDRef.current;
@@ -970,6 +1186,7 @@ export default function AgentPage() {
     }
 
     const createdSession = sessionResult.data;
+    resetSessionTokenTracking();
     sessionIDRef.current = createdSession.id;
     setSessionID(createdSession.id);
     setSelectedSessionID(createdSession.id);
@@ -977,7 +1194,14 @@ export default function AgentPage() {
     void loadSessionOptions();
 
     return createdSession.id;
-  }, [appendTrace, ensureClients, ensureEventStream, loadSessionOptions]);
+  }, [
+    appendTrace,
+    ensureClients,
+    ensureEventStream,
+    loadSessionOptions,
+    refreshModelContextLimits,
+    resetSessionTokenTracking,
+  ]);
 
   const sendPrompt = useCallback(async () => {
     const prompt = inputText.trim();
@@ -1149,6 +1373,7 @@ export default function AgentPage() {
     toolCardByCallIDRef.current.clear();
     openTextSegmentRef.current = null;
     activeAssistantServerMessageIDRef.current = null;
+    resetSessionTokenTracking();
 
     setSessionID(null);
     setSelectedSessionID("");
@@ -1161,7 +1386,7 @@ export default function AgentPage() {
     setQuestionDrafts({});
     setIsBusy(false);
     void loadSessionOptions();
-  }, [loadSessionOptions]);
+  }, [loadSessionOptions, resetSessionTokenTracking]);
 
   const handleComposerKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1173,78 +1398,55 @@ export default function AgentPage() {
   );
 
   const canEditBaseUrl = !sessionID && !isBusy;
+  const basePort = (() => {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.port) return parsed.port;
+      if (parsed.protocol === "https:") return "443";
+      if (parsed.protocol === "http:") return "80";
+      return "-";
+    } catch {
+      const match = baseUrl.match(/:(\d+)(?:\/|$)/);
+      return match?.[1] ?? "-";
+    }
+  })();
+  const modelLabel = activeModelKey ?? "-";
+  const contextUsedEstimate = sessionTokenTotals.input;
+  const contextUsagePercent =
+    activeContextLimit && activeContextLimit > 0
+      ? Math.min(999.9, (contextUsedEstimate / activeContextLimit) * 100)
+      : null;
+  const contextUsageText =
+    activeContextLimit && activeContextLimit > 0
+      ? `${formatTokenCount(contextUsedEstimate)} / ${formatTokenCount(
+          activeContextLimit
+        )} (${(contextUsagePercent ?? 0).toFixed(1)}%)`
+      : `${formatTokenCount(contextUsedEstimate)} / -`;
 
   return (
-    <main className="agent-page h-dvh overflow-hidden bg-zinc-50 p-4 text-zinc-900">
+    <main className="agent-page h-dvh overflow-hidden p-3 text-zinc-900 sm:p-4">
       <div
-        className={`mx-auto grid h-full max-w-7xl gap-4 ${
-          showTrace ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "lg:grid-cols-1"
+        className={`agent-layout mx-auto grid h-full max-w-[1500px] gap-3 ${
+          showTrace ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "lg:grid-cols-1"
         }`}
       >
-        <Card className="min-h-0 gap-0 overflow-hidden py-0">
-          <CardHeader className="space-y-3 border-b p-4">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-zinc-500">
-                OpenCode Agent
-              </p>
-              <CardTitle>Custom Chat Runtime</CardTitle>
-              <CardDescription>
-                Shadcn chat UI with Streamdown rendering, connected to your OpenCode
-                server.
-              </CardDescription>
-            </div>
-
+        <Card className="agent-panel min-h-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">
+          <CardHeader className="agent-header space-y-2 border-b-2 px-5 py-4">
             <div className="space-y-2">
-              <label className="text-xs font-medium" htmlFor="agent-base-url">
-                Base URL
-              </label>
-              <Input
-                id="agent-base-url"
-                value={baseUrl}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setBaseUrl(event.target.value)
-                }
-                disabled={!canEditBaseUrl}
-              />
-              <div className="flex items-center justify-between text-xs text-zinc-600">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-700">
                 <span>
                   Session: <strong>{sessionID ?? "Not started"}</strong>
                 </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void loadSessionOptions()}
-                  >
-                    Refresh Sessions
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowTrace((value) => !value)}
-                  >
-                    {showTrace ? "Hide Trace" : "Show Trace"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={resetSession}
-                  >
-                    New Session
-                  </Button>
-                </div>
+                <span>{isBusy ? "Running" : "Ready"}</span>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <NativeSelect
                   value={selectedSessionID}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                     setSelectedSessionID(event.target.value)
                   }
-                  className="w-full"
+                  className="agent-field w-full rounded-none border-2 text-sm shadow-none"
                   disabled={isBusy || availableSessions.length === 0}
                 >
                   <NativeSelectOption value="">
@@ -1260,35 +1462,65 @@ export default function AgentPage() {
                 </NativeSelect>
                 <Button
                   type="button"
-                  size="sm"
+                  size="xs"
                   variant="outline"
                   disabled={!selectedSessionID || isBusy}
                   onClick={() => void resumeSession()}
+                  className="agent-btn rounded-none border-2 shadow-none"
                 >
-                  Resume Session
+                  Resume
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      className="agent-btn rounded-none border-2 shadow-none"
+                    >
+                      More
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="agent-menu rounded-none border-2 border-zinc-900 bg-[#fffdf8]"
+                  >
+                    <DropdownMenuItem
+                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                      onSelect={() => void loadSessionOptions()}
+                    >
+                      Refresh Sessions
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                      onSelect={() => setShowTrace((value) => !value)}
+                    >
+                      {showTrace ? "Hide Trace" : "Show Trace"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                      onSelect={resetSession}
+                    >
+                      New Session
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="min-h-0 flex-1 px-0">
             <ScrollArea className="h-full">
-              <div className="space-y-4 px-4 py-4">
+              <div className="space-y-4 px-4 py-4 sm:px-5">
                 {timeline.length === 0 ? (
-                  <div className="grid min-h-[320px] place-items-center rounded-lg border border-dashed bg-zinc-50/70 p-6 text-center">
-                    <div>
-                      <p className="text-lg font-semibold">How can I help you today?</p>
-                      <p className="mt-1 text-sm text-zinc-500">
-                        Start a conversation. Markdown is rendered with Streamdown.
-                      </p>
-                    </div>
-                  </div>
+                  <div className="agent-empty min-h-[320px] border-2 border-dashed p-6" />
                 ) : (
                   timeline.map((item) => {
                     if (item.kind === "user") {
                       return (
                         <article key={item.id} className="flex justify-end">
-                          <div className="max-w-[85%] rounded-lg border bg-zinc-100 px-4 py-3 text-sm">
+                          <div className="agent-card agent-card-user max-w-[90%] border-2 px-4 py-3 text-sm sm:max-w-[85%]">
                             <Streamdown className="agent-markdown" mode="static">
                               {item.text}
                             </Streamdown>
@@ -1300,10 +1532,10 @@ export default function AgentPage() {
                     if (item.kind === "assistant-text") {
                       return (
                         <article key={item.id} className="flex justify-start">
-                          <div className="mr-3 mt-1 grid size-8 shrink-0 place-items-center rounded-full border bg-zinc-100 text-xs font-semibold text-zinc-700">
+                          <div className="agent-avatar mr-3 mt-1 grid size-8 shrink-0 place-items-center border-2 text-xs font-semibold">
                             A
                           </div>
-                          <div className="max-w-[85%] rounded-lg border bg-white px-4 py-3 text-sm">
+                          <div className="agent-card agent-card-assistant max-w-[90%] border-2 px-4 py-3 text-sm sm:max-w-[85%]">
                             <Streamdown
                               className="agent-markdown"
                               mode={item.running ? "streaming" : "static"}
@@ -1318,28 +1550,31 @@ export default function AgentPage() {
 
                     return (
                       <article key={item.id} className="flex justify-start">
-                        <div className="mr-3 mt-1 grid size-8 shrink-0 place-items-center rounded-full border bg-zinc-100 text-xs font-semibold text-zinc-700">
+                        <div className="agent-avatar agent-avatar-tool mr-3 mt-1 grid size-8 shrink-0 place-items-center border-2 text-xs font-semibold">
                           T
                         </div>
-                        <div className="max-w-[85%] rounded-lg border bg-zinc-50 p-3">
+                        <div className="agent-card agent-card-tool max-w-[90%] border-2 p-3 sm:max-w-[85%]">
                           <div className="mb-2 flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium">{item.toolCall.toolName}</p>
+                            <p className="text-sm font-semibold uppercase tracking-[0.07em]">
+                              {item.toolCall.toolName}
+                            </p>
                             <Badge
                               variant={
                                 item.toolCall.status === "error"
                                   ? "destructive"
                                   : "secondary"
                               }
+                              className="rounded-none border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em]"
                             >
                               {item.toolCall.status}
                             </Badge>
                           </div>
-                          <pre className="max-h-36 overflow-auto rounded border bg-white p-2 text-xs leading-relaxed whitespace-pre-wrap break-words">
+                          <pre className="agent-tool-pre max-h-36 overflow-auto border p-2 text-xs leading-relaxed whitespace-pre-wrap break-words">
                             {item.toolCall.argsText}
                           </pre>
                           {item.toolCall.result !== undefined ? (
                             <pre
-                              className={`mt-2 max-h-44 overflow-auto rounded border bg-white p-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${
+                              className={`agent-tool-pre mt-2 max-h-44 overflow-auto border p-2 text-xs leading-relaxed whitespace-pre-wrap break-words ${
                                 item.toolCall.isError ? "text-red-700" : ""
                               }`}
                             >
@@ -1357,10 +1592,10 @@ export default function AgentPage() {
           </CardContent>
 
           {(pendingQuestions.length > 0 || pendingPermissions.length > 0) && (
-            <section className="max-h-56 space-y-2 overflow-y-auto border-t p-3" aria-live="polite">
+            <section className="max-h-56 space-y-2 overflow-y-auto border-t-2 p-3" aria-live="polite">
               {pendingQuestions.map((request) => (
-                <article key={request.id} className="rounded-md border p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                <article key={request.id} className="agent-interactive border-2 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
                     Question
                   </p>
                   {request.questions.map((question, index) => (
@@ -1369,7 +1604,7 @@ export default function AgentPage() {
                       className="mt-2 space-y-1"
                     >
                       <p className="text-sm font-medium">{question.question}</p>
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-zinc-700">
                         {renderQuestionHints(question)}
                       </p>
                       <Input
@@ -1384,6 +1619,7 @@ export default function AgentPage() {
                         placeholder={
                           question.multiple ? "Answer(s), comma separated" : "Answer"
                         }
+                        className="agent-field rounded-none border-2 shadow-none"
                       />
                     </div>
                   ))}
@@ -1391,8 +1627,8 @@ export default function AgentPage() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="mt-3"
                     onClick={() => void handleQuestionReply(request)}
+                    className="agent-btn mt-3 rounded-none border-2 shadow-none"
                   >
                     Reply
                   </Button>
@@ -1400,13 +1636,13 @@ export default function AgentPage() {
               ))}
 
               {pendingPermissions.map((request) => (
-                <article key={request.id} className="rounded-md border p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                <article key={request.id} className="agent-interactive border-2 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
                     Permission
                   </p>
                   <p className="mt-1 text-sm font-medium">{request.permission}</p>
                   {request.patterns.length > 0 ? (
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="mt-1 text-xs text-zinc-700">
                       patterns: {request.patterns.join(", ")}
                     </p>
                   ) : null}
@@ -1416,6 +1652,7 @@ export default function AgentPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => void handlePermissionReply(request.id, "once")}
+                      className="agent-btn rounded-none border-2 shadow-none"
                     >
                       Once
                     </Button>
@@ -1424,6 +1661,7 @@ export default function AgentPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => void handlePermissionReply(request.id, "always")}
+                      className="agent-btn rounded-none border-2 shadow-none"
                     >
                       Always
                     </Button>
@@ -1432,6 +1670,7 @@ export default function AgentPage() {
                       size="sm"
                       variant="destructive"
                       onClick={() => void handlePermissionReply(request.id, "reject")}
+                      className="rounded-none border-2 border-red-700 bg-red-700 text-white hover:bg-red-800"
                     >
                       Reject
                     </Button>
@@ -1442,12 +1681,12 @@ export default function AgentPage() {
           )}
 
           {errorText ? (
-            <p className="border-t border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <p className="border-t-2 border-red-300 bg-red-50 p-3 text-sm text-red-800">
               {errorText}
             </p>
           ) : null}
 
-          <div className="border-t p-4">
+          <div className="agent-composer border-t-2 p-4">
             <div className="space-y-2">
               <Textarea
                 value={inputText}
@@ -1456,19 +1695,34 @@ export default function AgentPage() {
                 }
                 onKeyDown={handleComposerKeyDown}
                 placeholder="Write a message..."
-                className="min-h-20 resize-none"
+                className="agent-field min-h-24 resize-none rounded-none border-2 shadow-none"
                 disabled={isBusy}
               />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-zinc-500">
-                  {isBusy
-                    ? "Waiting for assistant response..."
-                    : "Press Enter to send, Shift+Enter for newline."}
-                </p>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-zinc-700">
+                    {isBusy
+                      ? "Waiting for assistant response..."
+                      : "Press Enter to send, Shift+Enter for newline."}
+                  </p>
+                  <p className="text-[11px] text-zinc-700">Model: {modelLabel}</p>
+                  <p className="text-[11px] text-zinc-600">
+                    Input tokens (sent to the model):{" "}
+                    {formatTokenCount(sessionTokenTotals.input)}
+                    {" · "}Output tokens (generated by the model):{" "}
+                    {formatTokenCount(sessionTokenTotals.output)}
+                    {" · "}Reasoning tokens (internal reasoning):{" "}
+                    {formatTokenCount(sessionTokenTotals.reasoning)}
+                  </p>
+                  <p className="text-[11px] text-zinc-600">
+                    Estimated context window usage: {contextUsageText}
+                  </p>
+                </div>
                 <Button
                   type="button"
                   onClick={() => void sendPrompt()}
                   disabled={!inputText.trim() || isBusy}
+                  className="agent-btn-primary rounded-none border-2 border-zinc-900 px-5 shadow-none"
                 >
                   Send
                 </Button>
@@ -1478,9 +1732,53 @@ export default function AgentPage() {
         </Card>
 
         {showTrace ? (
-          <Card className="hidden min-h-0 gap-0 overflow-hidden py-0 lg:flex">
-            <CardHeader className="border-b p-3">
-              <CardTitle className="text-sm">Live Trace</CardTitle>
+          <Card className="agent-trace-panel hidden min-h-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none lg:flex">
+            <CardHeader className="border-b-2 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm">Live Trace</CardTitle>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setShowTrace(false)}
+                  className="agent-btn rounded-none border-2 shadow-none"
+                >
+                  Hide
+                </Button>
+              </div>
+              <div className="mt-2 space-y-2">
+                <div className="space-y-1">
+                  <label
+                    className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700"
+                    htmlFor="trace-base-url"
+                  >
+                    Base URL
+                  </label>
+                  <Input
+                    id="trace-base-url"
+                    value={baseUrl}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      setBaseUrl(event.target.value)
+                    }
+                    disabled={!canEditBaseUrl}
+                    className="agent-field h-8 rounded-none border-2 px-2 text-xs shadow-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label
+                    className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700"
+                    htmlFor="trace-base-port"
+                  >
+                    Port
+                  </label>
+                  <Input
+                    id="trace-base-port"
+                    value={basePort}
+                    readOnly
+                    className="agent-field h-8 rounded-none border-2 px-2 text-xs shadow-none"
+                  />
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="min-h-0 flex-1 p-0">
               <ScrollArea className="h-full p-3 font-mono text-xs leading-relaxed">

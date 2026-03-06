@@ -16,20 +16,192 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Aptos", "Segoe UI", sans-serif;
 }
 
 .agent-page {
-  --border-color: #e4e4e7;
-  --muted-surface: #f4f4f5;
-  --muted-text: #52525b;
-  --link-color: #1d4ed8;
+  --ink: #142233;
+  --ink-soft: #405164;
+  --paper: #f5f1e6;
+  --paper-2: #ece4d2;
+  --paper-3: #e2d8c2;
+  --brand: #1f3f69;
+  --brand-soft: #d9e2ef;
+  --danger: #8a1f1f;
+  --border-color: #142233;
+  --muted-surface: #ede6d6;
+  --muted-text: #49596b;
+  --link-color: #204f88;
+
+  background:
+    linear-gradient(180deg, #e8dfcb 0%, #f5f1e6 26%, #f5f1e6 100%),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 36px,
+      rgba(20, 34, 51, 0.03) 36px,
+      rgba(20, 34, 51, 0.03) 37px
+    );
+  color: var(--ink);
+}
+
+.agent-layout {
+  align-items: stretch;
+}
+
+.agent-panel,
+.agent-trace-panel {
+  border-color: var(--border-color) !important;
+  background: var(--paper);
+  box-shadow: 8px 8px 0 rgba(20, 34, 51, 0.16);
+}
+
+.agent-header {
+  background: var(--paper-2);
+  border-color: var(--border-color) !important;
+}
+
+.agent-masthead {
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 0.7rem;
+}
+
+.agent-kicker {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.agent-title {
+  color: var(--ink);
+  font-family:
+    "Iowan Old Style", "Book Antiqua", Palatino, "Palatino Linotype", serif;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.agent-subtitle {
+  color: var(--muted-text);
+}
+
+.agent-field {
+  border-color: var(--border-color) !important;
+  background: #fffcf4 !important;
+  color: var(--ink) !important;
+}
+
+.agent-field:focus-visible {
+  border-color: var(--border-color) !important;
+  box-shadow: 4px 4px 0 rgba(31, 63, 105, 0.28) !important;
+}
+
+.agent-btn {
+  border-color: var(--border-color) !important;
+  color: var(--ink) !important;
+  background: #fffdf8 !important;
+}
+
+.agent-btn:hover {
+  background: var(--brand-soft) !important;
+}
+
+.agent-menu {
+  border-color: var(--border-color) !important;
+  background: #fffdf8 !important;
+}
+
+.agent-menu-item {
+  cursor: pointer !important;
+}
+
+.agent-menu-item:hover,
+.agent-menu-item[data-highlighted] {
+  background: #d9e2ef !important;
+  color: #111827 !important;
+}
+
+.agent-menu-item:active {
+  background: #bfd0e6 !important;
+}
+
+.agent-btn-primary {
+  border-color: var(--border-color) !important;
+  color: #f6f9ff !important;
+  background: var(--brand) !important;
+}
+
+.agent-btn-primary:hover {
+  background: #173457 !important;
+}
+
+.agent-empty {
+  border-color: var(--border-color) !important;
+  background:
+    linear-gradient(180deg, rgba(236, 228, 210, 0.6), rgba(245, 241, 230, 0.7)),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 28px,
+      rgba(20, 34, 51, 0.05) 28px,
+      rgba(20, 34, 51, 0.05) 29px
+    );
+}
+
+.agent-avatar {
+  border-color: var(--border-color) !important;
+  background: var(--paper-3);
+  color: var(--ink);
+}
+
+.agent-avatar-tool {
+  background: #dcd0b6;
+}
+
+.agent-card {
+  border-color: var(--border-color) !important;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(20, 34, 51, 0.12);
+}
+
+.agent-card-user {
+  background: #dbe4ef;
+}
+
+.agent-card-assistant {
+  background: #fffdf7;
+}
+
+.agent-card-tool {
+  background: #ece4d2;
+}
+
+.agent-tool-pre {
+  border-color: var(--border-color) !important;
+  background: #fffefb;
+}
+
+.agent-interactive {
+  border-color: var(--border-color) !important;
+  background: #f0e8d9;
+}
+
+.agent-composer {
+  border-color: var(--border-color) !important;
+  background: var(--paper-2);
+}
+
+.agent-trace-panel [data-slot="card-header"] {
+  background: var(--paper-2);
+  border-color: var(--border-color) !important;
 }
 
 .agent-markdown {
-  color: #18181b;
-  line-height: 1.65;
+  color: var(--ink);
+  line-height: 1.7;
   font-size: 0.95rem;
+  font-family:
+    "Source Serif 4", "Iowan Old Style", "Book Antiqua", Palatino,
+    "Palatino Linotype", serif;
 }
 
 .agent-markdown [data-streamdown="heading-1"],
@@ -39,17 +211,18 @@ body {
   margin-top: 1.25rem;
   margin-bottom: 0.5rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
 }
 
 .agent-markdown [data-streamdown="heading-1"] {
   font-size: 1.4rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 2px solid var(--border-color);
   padding-bottom: 0.35rem;
 }
 
 .agent-markdown [data-streamdown="heading-2"] {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
 }
 
 .agent-markdown [data-streamdown="heading-3"] {
@@ -71,30 +244,32 @@ body {
 
 .agent-markdown [data-streamdown="blockquote"] {
   margin: 0.8rem 0;
-  border-left: 3px solid var(--border-color);
+  border-left: 4px solid var(--border-color);
   padding-left: 0.8rem;
   color: var(--muted-text);
 }
 
 .agent-markdown [data-streamdown="inline-code"] {
   border: 1px solid var(--border-color);
-  border-radius: 0.35rem;
+  border-radius: 0;
   background: var(--muted-surface);
   padding: 0.08rem 0.35rem;
   font-size: 0.85em;
+  font-family: var(--font-geist-mono), "Consolas", "Courier New", monospace;
 }
 
 .agent-markdown [data-streamdown="code-block"] {
   margin: 0.8rem 0;
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  background: #fafafa;
+  border: 2px solid var(--border-color);
+  border-radius: 0;
+  background: #fffdf8;
   overflow: auto;
 }
 
 .agent-markdown pre {
   margin: 0;
   padding: 0.9rem;
+  font-family: var(--font-geist-mono), "Consolas", "Courier New", monospace;
 }
 
 .agent-markdown [data-streamdown="table"] {
@@ -118,4 +293,20 @@ body {
   color: var(--link-color);
   text-decoration: underline;
   text-underline-offset: 2px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .agent-panel,
+  .agent-trace-panel {
+    box-shadow: none;
+  }
+
+  .agent-title {
+    font-size: 1.45rem;
+  }
+
+  .agent-card {
+    max-width: 96% !important;
+  }
 }
