@@ -3148,87 +3148,82 @@ export default function AgentPage() {
         }`}
       >
         <Card className="agent-panel min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">
-          <CardHeader className="agent-header space-y-2 border-b-2 px-5 py-4">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-700">
-                <span>
-                  Session: <strong>{sessionID ?? "Not started"}</strong>
-                </span>
-                <span>{isBusy ? "Running" : "Ready"}</span>
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-                <NativeSelect
-                  value={selectedSessionID}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    setSelectedSessionID(event.target.value)
-                  }
-                  className="agent-field w-full rounded-none border-2 text-sm shadow-none"
-                  disabled={isBusy || availableSessions.length === 0}
-                >
-                  <NativeSelectOption value="">
-                    {availableSessions.length === 0
-                      ? "No saved sessions found"
-                      : "Select session to resume"}
+          <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col px-0">
+            <div className="flex flex-wrap items-center gap-2 px-4 pb-2 pt-4 sm:px-5">
+              <NativeSelect
+                value={selectedSessionID}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  setSelectedSessionID(event.target.value)
+                }
+                className="agent-field min-w-0 flex-1 rounded-none border-2 text-sm shadow-none"
+                disabled={isBusy || availableSessions.length === 0}
+              >
+                <NativeSelectOption value="">
+                  {availableSessions.length === 0
+                    ? "No saved sessions found"
+                    : "Select session to resume"}
+                </NativeSelectOption>
+                {availableSessions.map((session) => (
+                  <NativeSelectOption key={session.id} value={session.id}>
+                    {formatSessionOptionLabel(session)}
                   </NativeSelectOption>
-                  {availableSessions.map((session) => (
-                    <NativeSelectOption key={session.id} value={session.id}>
-                      {formatSessionOptionLabel(session)}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  disabled={!selectedSessionID || isBusy}
-                  onClick={() => void resumeSession()}
-                  className="agent-btn rounded-none border-2 shadow-none"
-                >
-                  Resume
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      className="agent-btn rounded-none border-2 shadow-none"
-                    >
-                      More
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="agent-menu rounded-none border-2 border-zinc-900 bg-[#fffdf8]"
+                ))}
+              </NativeSelect>
+              <Badge
+                variant="secondary"
+                className="rounded-none border px-2 py-1 text-[10px] uppercase tracking-[0.08em]"
+              >
+                {isBusy ? "Running" : "Ready"}
+              </Badge>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!selectedSessionID || isBusy}
+                onClick={() => void resumeSession()}
+                className="agent-btn rounded-none border-2 shadow-none"
+              >
+                Resume
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    className="agent-btn rounded-none border-2 shadow-none"
                   >
-                    <DropdownMenuItem
-                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
-                      onSelect={() => void loadSessionOptions()}
-                    >
-                      Refresh Sessions
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
-                      onSelect={() => setShowTrace((value) => !value)}
-                    >
-                      {showTrace ? "Hide Trace" : "Show Trace"}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
-                      onSelect={resetSession}
-                    >
-                      New Session
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="agent-menu rounded-none border-2 border-zinc-900 bg-[#fffdf8]"
+                >
+                  <DropdownMenuItem
+                    className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                    onSelect={() => void loadSessionOptions()}
+                  >
+                    Refresh Sessions
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                    onSelect={() => setShowTrace((value) => !value)}
+                  >
+                    {showTrace ? "Hide Trace" : "Show Trace"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="agent-menu-item cursor-pointer rounded-none hover:bg-[#d9e2ef] hover:text-zinc-900 focus:bg-[#d9e2ef] focus:text-zinc-900 data-[highlighted]:bg-[#d9e2ef] data-[highlighted]:text-zinc-900"
+                    onSelect={resetSession}
+                  >
+                    New Session
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </CardHeader>
 
-          <CardContent className="min-h-0 min-w-0 flex-1 px-0">
-            <div ref={timelineScrollAreaRef} className="h-full min-w-0">
+            <div ref={timelineScrollAreaRef} className="min-h-0 flex-1 min-w-0">
               <ScrollArea type="always" className="h-full min-w-0">
                 <div className="min-w-0 space-y-4 px-4 py-4 sm:px-5">
                   {timeline.length === 0 ? (
@@ -3593,7 +3588,7 @@ export default function AgentPage() {
             </p>
           ) : null}
 
-          <div className="agent-composer min-w-0 border-t-2 p-4">
+          <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
             <div className="space-y-2">
               <Textarea
                 value={inputText}
@@ -3602,7 +3597,7 @@ export default function AgentPage() {
                 }
                 onKeyDown={handleComposerKeyDown}
                 placeholder="Write a message..."
-                className="agent-field min-h-24 resize-none rounded-none border-2 shadow-none"
+                className="agent-field min-h-16 max-h-40 overflow-y-auto resize-none rounded-none border-2 shadow-none"
                 disabled={isBusy}
               />
               <div className="flex items-start justify-between gap-4">
