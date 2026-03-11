@@ -16,6 +16,8 @@ import {
 } from "@opencode-ai/sdk/client";
 import {
   createOpencodeClient as createOpencodeClientV2,
+  type Event as EventV2,
+  type Part as PartV2,
   type PermissionRequest,
   type QuestionInfo,
   type QuestionRequest,
@@ -61,9 +63,27 @@ const HEARTBEAT_STALE_MS = 15_000;
 const HEARTBEAT_CHECK_INTERVAL_MS = 1_000;
 const INTERACTIVE_REFRESH_DEBOUNCE_MS = 150;
 const STATUS_POLL_INTERVAL_MS = 2_500;
+const IDENTIFIER_PREFIXES = {
+  session: "ses",
+  message: "msg",
+  permission: "per",
+  question: "que",
+  user: "usr",
+  part: "prt",
+  pty: "pty",
+  tool: "tool",
+  workspace: "wrk",
+} as const;
+const IDENTIFIER_RANDOM_LENGTH = 14;
 
-type StreamEvent = Event | { payload: Event };
-type ToolPart = Extract<Part, { type: "tool" }>;
+let lastIdentifierTimestamp = 0;
+let identifierCounter = 0;
+
+type AgentEvent = Event | EventV2;
+type StreamEvent = AgentEvent | { payload: AgentEvent };
+type AgentPart = Part | PartV2;
+type TextPart = Extract<AgentPart, { type: "text" }>;
+type ToolPart = Extract<AgentPart, { type: "tool" }>;
 
 type RuntimeToolCall = {
   toolCallId: string;
@@ -94,6 +114,17 @@ type TimelineItem =
       partID: string;
       toolCall: RuntimeToolCall;
     };
+
+type MessageEntry = {
+  id: string;
+  role: "user" | "assistant";
+  parentID?: string;
+  createdAt: number;
+  text: string;
+  localOnly: boolean;
+};
+
+type MessagePartEntry = Exclude<TimelineItem, { kind: "user" }>;
 
 type ActiveRun = {
   id: string;
@@ -185,8 +216,31 @@ const EMPTY_TOKEN_USAGE: TokenUsageTotals = {
   cacheWrite: 0,
 };
 
-function normalizeEvent(event: StreamEvent): Event {
+function normalizeEvent(event: StreamEvent): AgentEvent {
   return "payload" in event ? event.payload : event;
+}
+
+function createAscendingIdentifier(prefix: keyof typeof IDENTIFIER_PREFIXES): string {
+  const currentTimestamp = Date.now();
+  if (currentTimestamp !== lastIdentifierTimestamp) {
+    lastIdentifierTimestamp = currentTimestamp;
+    identifierCounter = 0;
+  }
+  identifierCounter += 1;
+
+  const encoded = BigInt(currentTimestamp) * BigInt(0x1000) + BigInt(identifierCounter);
+  const timeBytes = new Uint8Array(6);
+  for (let index = 0; index < timeBytes.length; index += 1) {
+    timeBytes[index] = Number((encoded >> BigInt(40 - 8 * index)) & BigInt(0xff));
+  }
+
+  const timeHex = Array.from(timeBytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const randomBytes = new Uint8Array(IDENTIFIER_RANDOM_LENGTH);
+  crypto.getRandomValues(randomBytes);
+  const randomSuffix = Array.from(randomBytes, (value) => chars[value % chars.length]).join("");
+
+  return `${IDENTIFIER_PREFIXES[prefix]}_${timeHex}${randomSuffix}`;
 }
 
 function summarizeText(value: string, maxLength = 180): string {
@@ -707,30 +761,149 @@ function formatSessionOptionLabel(session: SessionOption): string {
   return `${title} • ${shortID} • ${timestamp}`;
 }
 
+function compareAscending(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function sortStoredParts(parts: Array<Part>): Array<Part> {
+  return [...parts].sort((left, right) => compareAscending(left.id, right.id));
+}
+
+function sortMessageEntries(entries: Array<MessageEntry>): Array<MessageEntry> {
+  return [...entries].sort((left, right) => {
+    const leftTurnID = left.parentID ?? left.id;
+    const rightTurnID = right.parentID ?? right.id;
+    const turnOrder = compareAscending(leftTurnID, rightTurnID);
+    if (turnOrder !== 0) return turnOrder;
+
+    if (left.parentID && !right.parentID) return 1;
+    if (!left.parentID && right.parentID) return -1;
+
+    return compareAscending(left.id, right.id);
+  });
+}
+
+function sortMessagePartEntries(parts: Array<MessagePartEntry>): Array<MessagePartEntry> {
+  return [...parts].sort((left, right) => compareAscending(left.partID, right.partID));
+}
+
+function buildTimelineFromMessageState(
+  messages: Array<MessageEntry>,
+  partsByMessageID: Map<string, Array<MessagePartEntry>>
+): Array<TimelineItem> {
+  const next: Array<TimelineItem> = [];
+
+  for (const message of sortMessageEntries(messages)) {
+    if (message.role === "user") {
+      const text = message.text.trim();
+      if (!text) continue;
+      next.push({
+        id: message.id,
+        kind: "user",
+        text: message.text,
+      });
+      continue;
+    }
+
+    const parts = sortMessagePartEntries(partsByMessageID.get(message.id) ?? []);
+    for (const part of parts) {
+      if (part.kind === "assistant-text" && !part.text.trim() && !part.running) {
+        continue;
+      }
+      next.push(part);
+    }
+  }
+
+  return next;
+}
+
+function upsertMessageEntry(entries: Array<MessageEntry>, nextEntry: MessageEntry) {
+  const index = entries.findIndex((entry) => entry.id === nextEntry.id);
+  if (index >= 0) {
+    entries[index] = {
+      ...entries[index],
+      ...nextEntry,
+    };
+    return;
+  }
+  entries.push(nextEntry);
+}
+
+function findMessageEntry(entries: Array<MessageEntry>, messageID: string): MessageEntry | undefined {
+  return entries.find((entry) => entry.id === messageID);
+}
+
+function updateUserMessageText(
+  entries: Array<MessageEntry>,
+  messageID: string,
+  text: string,
+  mode: "replace" | "append"
+) {
+  const existing = findMessageEntry(entries, messageID);
+  const currentText = existing?.role === "user" ? existing.text : "";
+  const nextText = mode === "append" ? `${currentText}${text}` : text;
+
+  upsertMessageEntry(entries, {
+    id: messageID,
+    role: "user",
+    parentID: existing?.parentID,
+    createdAt: existing?.createdAt ?? Date.now(),
+    text: nextText,
+    localOnly: existing?.localOnly ?? false,
+  });
+}
+
+function upsertMessagePart(parts: Array<MessagePartEntry>, nextPart: MessagePartEntry) {
+  const index = parts.findIndex((part) => part.partID === nextPart.partID);
+  if (index >= 0) {
+    parts[index] = nextPart;
+    return;
+  }
+  parts.push(nextPart);
+}
+
+function getAssistantTextFromMessageParts(parts: Array<MessagePartEntry> | undefined): string {
+  if (!parts?.length) return "";
+  return sortMessagePartEntries(parts)
+    .filter(
+      (part): part is Extract<MessagePartEntry, { kind: "assistant-text" }> =>
+        part.kind === "assistant-text"
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+function isTextPartRunning(part: TextPart): boolean {
+  const time = "time" in part ? part.time : undefined;
+  if (!time || typeof time !== "object") return true;
+  return typeof (time as Record<string, unknown>).end !== "number";
+}
+
 function getLatestAssistantSnapshot(storedMessages: Array<StoredMessage>): {
   text: string;
-  lastTextPartID: string | null;
 } {
   const ordered = [...storedMessages].sort(
-    (left, right) => left.info.time.created - right.info.time.created
+    (left, right) =>
+      left.info.time.created - right.info.time.created ||
+      compareAscending(left.info.id, right.info.id)
   );
   const latestAssistant = [...ordered]
     .reverse()
     .find((message) => message.info.role === "assistant");
 
   if (!latestAssistant) {
-    return { text: "", lastTextPartID: null };
+    return { text: "" };
   }
 
   let text = "";
-  let lastTextPartID: string | null = null;
-  for (const part of latestAssistant.parts) {
+  for (const part of sortStoredParts(latestAssistant.parts)) {
     if (part.type !== "text") continue;
     text += part.text;
-    lastTextPartID = part.id;
   }
 
-  return { text, lastTextPartID };
+  return { text };
 }
 
 function mergeAssistantText(currentText: string, canonicalText: string): string {
@@ -793,6 +966,89 @@ function didSnapshotCaptureActiveRun(
   return ordered[ordered.length - 1]?.info.role === "assistant";
 }
 
+function buildMessageStateFromStoredMessages(storedMessages: Array<StoredMessage>): {
+  messages: Array<MessageEntry>;
+  partsByMessageID: Map<string, Array<MessagePartEntry>>;
+  latestAssistantText: string;
+} {
+  const ordered = [...storedMessages].sort(
+    (left, right) =>
+      left.info.time.created - right.info.time.created ||
+      compareAscending(left.info.id, right.info.id)
+  );
+  const messages: Array<MessageEntry> = [];
+  const partsByMessageID = new Map<string, Array<MessagePartEntry>>();
+  let latestAssistantText = "";
+
+  for (const message of ordered) {
+    if (message.info.role === "user") {
+      const text = sortStoredParts(message.parts)
+        .filter(
+          (part): part is Extract<Part, { type: "text" }> => part.type === "text"
+        )
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+
+      if (!text) continue;
+
+      messages.push({
+        id: message.info.id,
+        role: "user",
+        parentID: undefined,
+        createdAt: message.info.time.created,
+        text,
+        localOnly: false,
+      });
+      continue;
+    }
+
+    messages.push({
+      id: message.info.id,
+      role: "assistant",
+      parentID:
+        typeof (message.info as Record<string, unknown>).parentID === "string"
+          ? String((message.info as Record<string, unknown>).parentID)
+          : undefined,
+      createdAt: message.info.time.created,
+      text: "",
+      localOnly: false,
+    });
+
+    const parts: Array<MessagePartEntry> = [];
+    for (const part of sortStoredParts(message.parts)) {
+      if (part.type === "text") {
+        parts.push({
+          id: `assistant-text-${part.id}`,
+          kind: "assistant-text",
+          partID: part.id,
+          text: part.text,
+          running: isTextPartRunning(part),
+        });
+        continue;
+      }
+
+      if (part.type === "tool") {
+        parts.push({
+          id: `tool-${part.id}`,
+          kind: "tool",
+          partID: part.id,
+          toolCall: toRuntimeToolCall(part),
+        });
+      }
+    }
+
+    partsByMessageID.set(message.info.id, parts);
+    latestAssistantText = getAssistantTextFromMessageParts(parts);
+  }
+
+  return {
+    messages,
+    partsByMessageID,
+    latestAssistantText,
+  };
+}
+
 export default function AgentPage() {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [sessionID, setSessionID] = useState<string | null>(null);
@@ -840,11 +1096,12 @@ export default function AgentPage() {
   const interactiveRefreshDirtyRef = useRef(false);
   const interactiveRefreshTimerRef = useRef<number | null>(null);
   const runCompletionInFlightRef = useRef<string | null>(null);
+  const timelinePublishFrameRef = useRef<number | null>(null);
+  const messageEntriesRef = useRef<Array<MessageEntry>>([]);
+  const messagePartsByMessageIDRef = useRef<Map<string, Array<MessagePartEntry>>>(new Map());
   const messageRoleByIDRef = useRef<Map<string, "user" | "assistant">>(new Map());
   const partTextSeenRef = useRef<Map<string, string>>(new Map());
   const toolStateSeenRef = useRef<Map<string, string>>(new Map());
-  const toolCardByCallIDRef = useRef<Map<string, string>>(new Map());
-  const openTextSegmentRef = useRef<{ partID: string; itemID: string } | null>(null);
   const activeAssistantServerMessageIDRef = useRef<string | null>(null);
   const activeRunRef = useRef<ActiveRun | null>(null);
   const timelineScrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -866,6 +1123,63 @@ export default function AgentPage() {
     timelineRef.current = timeline;
   }, [timeline]);
 
+  const flushTimelineFromMessageState = useCallback(() => {
+    timelinePublishFrameRef.current = null;
+    const nextTimeline = buildTimelineFromMessageState(
+      messageEntriesRef.current,
+      messagePartsByMessageIDRef.current
+    );
+    timelineRef.current = nextTimeline;
+    setTimeline(nextTimeline);
+  }, []);
+
+  const publishTimelineFromMessageState = useCallback(() => {
+    if (timelinePublishFrameRef.current !== null) return;
+    timelinePublishFrameRef.current = window.requestAnimationFrame(() => {
+      flushTimelineFromMessageState();
+    });
+  }, [flushTimelineFromMessageState]);
+
+  const replaceMessageState = useCallback(
+    (
+      messages: Array<MessageEntry>,
+      partsByMessageID: Map<string, Array<MessagePartEntry>>
+    ) => {
+      messageEntriesRef.current = sortMessageEntries(messages);
+      messagePartsByMessageIDRef.current = new Map(
+        [...partsByMessageID.entries()].map(([messageID, parts]) => [
+          messageID,
+          sortMessagePartEntries(parts),
+        ])
+      );
+      publishTimelineFromMessageState();
+    },
+    [publishTimelineFromMessageState]
+  );
+
+  const mutateMessageState = useCallback(
+    (
+      mutate: (
+        messages: Array<MessageEntry>,
+        partsByMessageID: Map<string, Array<MessagePartEntry>>
+      ) => void
+    ) => {
+      const nextMessages = [...messageEntriesRef.current];
+      const nextPartsByMessageID = new Map<string, Array<MessagePartEntry>>();
+      for (const [messageID, parts] of messagePartsByMessageIDRef.current.entries()) {
+        nextPartsByMessageID.set(messageID, [...parts]);
+      }
+
+      mutate(nextMessages, nextPartsByMessageID);
+      replaceMessageState(nextMessages, nextPartsByMessageID);
+    },
+    [replaceMessageState]
+  );
+
+  const getAssistantTextForMessage = useCallback((messageID: string) => {
+    return getAssistantTextFromMessageParts(messagePartsByMessageIDRef.current.get(messageID));
+  }, []);
+
   const getTimelineViewport = useCallback(() => {
     if (!timelineScrollAreaRef.current) return null;
     return timelineScrollAreaRef.current.querySelector(
@@ -875,7 +1189,10 @@ export default function AgentPage() {
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isBusy ? "auto" : "smooth",
+      block: "end",
+    });
   }, [timeline, isBusy, runUiPhase]);
 
   useEffect(() => {
@@ -964,164 +1281,139 @@ export default function AgentPage() {
     setTraceLines((previous) => [...previous.slice(-299), formatted]);
   }, []);
 
-  const appendUserCard = useCallback((text: string) => {
-    setTimeline((previous) => {
-      const next = [
-        ...previous,
-        {
-          id: `user-${crypto.randomUUID()}`,
-          kind: "user" as const,
+  const appendUserCard = useCallback(
+    (messageID: string, text: string, createdAt = Date.now(), localOnly = true) => {
+      messageRoleByIDRef.current.set(messageID, "user");
+      mutateMessageState((messages) => {
+        messages.push({
+          id: messageID,
+          role: "user",
+          parentID: undefined,
+          createdAt,
           text,
-        },
-      ];
-      timelineRef.current = next;
-      return next;
-    });
-  }, []);
+          localOnly,
+        });
+      });
+    },
+    [mutateMessageState]
+  );
 
-  const appendAssistantTextChunk = useCallback(
-    (partID: string, chunk: string, running: boolean) => {
-      if (!chunk) return;
+  const upsertAssistantMessageEntry = useCallback(
+    (messageID: string, createdAt = Date.now(), parentID?: string) => {
+      mutateMessageState((messages) => {
+        const existing = findMessageEntry(messages, messageID);
+        upsertMessageEntry(messages, {
+          id: messageID,
+          role: "assistant",
+          parentID: existing?.parentID ?? parentID,
+          createdAt: existing?.createdAt ?? createdAt,
+          text: "",
+          localOnly: false,
+        });
+      });
+    },
+    [mutateMessageState]
+  );
 
-      setTimeline((previous) => {
-        const next = [...previous];
-        const activeSegment = openTextSegmentRef.current;
-        if (activeSegment && activeSegment.partID === partID) {
-          const index = next.findIndex((item) => item.id === activeSegment.itemID);
-          if (index >= 0) {
-            const existing = next[index];
-            if (existing.kind === "assistant-text") {
-              next[index] = {
-                ...existing,
-                text: `${existing.text}${chunk}`,
-                running,
-              };
-              timelineRef.current = next;
-              return next;
-            }
-          }
-        }
+  const upsertAssistantTextPart = useCallback(
+    (messageID: string, partID: string, text: string, running: boolean) => {
+      mutateMessageState((messages, partsByMessageID) => {
+        const existing = findMessageEntry(messages, messageID);
+        upsertMessageEntry(messages, {
+          id: messageID,
+          role: "assistant",
+          parentID: existing?.parentID,
+          createdAt: existing?.createdAt ?? Date.now(),
+          text: "",
+          localOnly: false,
+        });
 
-        const itemID = `assistant-text-${crypto.randomUUID()}`;
-        next.push({
-          id: itemID,
+        const parts = partsByMessageID.get(messageID) ?? [];
+        upsertMessagePart(parts, {
+          id: `assistant-text-${partID}`,
           kind: "assistant-text",
           partID,
-          text: chunk,
+          text,
           running,
         });
-        openTextSegmentRef.current = { partID, itemID };
-        timelineRef.current = next;
-        return next;
+        partsByMessageID.set(messageID, parts);
       });
     },
-    []
+    [mutateMessageState]
   );
 
-  const upsertToolCard = useCallback((partID: string, toolCall: RuntimeToolCall) => {
-    setTimeline((previous) => {
-      const next = [...previous];
-      const existingItemID = toolCardByCallIDRef.current.get(toolCall.toolCallId);
-      if (existingItemID) {
-        const index = next.findIndex((item) => item.id === existingItemID);
-        if (index >= 0 && next[index].kind === "tool") {
-          next[index] = {
-            ...next[index],
-            partID,
-            toolCall,
-          };
-          timelineRef.current = next;
-          return next;
-        }
-      }
+  const applyAssistantTextDelta = useCallback(
+    (messageID: string, partID: string, delta: string) => {
+      if (!delta) return;
 
-      const itemID = existingItemID ?? `tool-${toolCall.toolCallId}-${crypto.randomUUID()}`;
-      toolCardByCallIDRef.current.set(toolCall.toolCallId, itemID);
-      next.push({
-        id: itemID,
-        kind: "tool",
-        partID,
-        toolCall,
+      mutateMessageState((messages, partsByMessageID) => {
+        const existing = findMessageEntry(messages, messageID);
+        upsertMessageEntry(messages, {
+          id: messageID,
+          role: "assistant",
+          parentID: existing?.parentID,
+          createdAt: existing?.createdAt ?? Date.now(),
+          text: "",
+          localOnly: false,
+        });
+
+        const parts = partsByMessageID.get(messageID) ?? [];
+        const index = parts.findIndex((part) => part.partID === partID);
+        const previous = index >= 0 ? parts[index] : null;
+        const currentText =
+          previous?.kind === "assistant-text" ? previous.text : "";
+
+        upsertMessagePart(parts, {
+          id: `assistant-text-${partID}`,
+          kind: "assistant-text",
+          partID,
+          text: `${currentText}${delta}`,
+          running: true,
+        });
+        partsByMessageID.set(messageID, parts);
       });
-      timelineRef.current = next;
-      return next;
-    });
+    },
+    [mutateMessageState]
+  );
 
-    // A tool card breaks any active text segment; subsequent text gets a new card.
-    openTextSegmentRef.current = null;
-  }, []);
+  const upsertToolCard = useCallback(
+    (messageID: string, partID: string, toolCall: RuntimeToolCall) => {
+      mutateMessageState((messages, partsByMessageID) => {
+        const existing = findMessageEntry(messages, messageID);
+        upsertMessageEntry(messages, {
+          id: messageID,
+          role: "assistant",
+          parentID: existing?.parentID,
+          createdAt: existing?.createdAt ?? Date.now(),
+          text: "",
+          localOnly: false,
+        });
+
+        const parts = partsByMessageID.get(messageID) ?? [];
+        upsertMessagePart(parts, {
+          id: `tool-${partID}`,
+          kind: "tool",
+          partID,
+          toolCall,
+        });
+        partsByMessageID.set(messageID, parts);
+      });
+    },
+    [mutateMessageState]
+  );
 
   const markAssistantCardsComplete = useCallback(() => {
-    openTextSegmentRef.current = null;
-    setTimeline((previous) => {
-      const next = previous.map((item) =>
-        item.kind === "assistant-text" && item.running
-          ? { ...item, running: false }
-          : item
-      );
-      timelineRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const buildTimelineFromStoredMessages = useCallback(
-    (storedMessages: Array<StoredMessage>) => {
-      const ordered = [...storedMessages].sort(
-        (left, right) => left.info.time.created - right.info.time.created
-      );
-      const items: Array<TimelineItem> = [];
-
-      for (const message of ordered) {
-        if (message.info.role === "user") {
-          const text = message.parts
-            .filter(
-              (part): part is Extract<Part, { type: "text" }> => part.type === "text"
-            )
-            .map((part) => part.text)
-            .join("\n")
-            .trim();
-
-          if (text) {
-            items.push({
-              id: `history-user-${message.info.id}`,
-              kind: "user",
-              text,
-            });
-          }
-          continue;
-        }
-
-        if (message.info.role === "assistant") {
-          for (const part of message.parts) {
-            if (part.type === "text") {
-              const text = part.text.trim();
-              if (!text) continue;
-
-              items.push({
-                id: `history-text-${part.id}`,
-                kind: "assistant-text",
-                partID: part.id,
-                text: part.text,
-                running: false,
-              });
-            }
-
-            if (part.type === "tool") {
-              items.push({
-                id: `history-tool-${part.id}`,
-                kind: "tool",
-                partID: part.id,
-                toolCall: toRuntimeToolCall(part),
-              });
-            }
-          }
-        }
+    mutateMessageState((_, partsByMessageID) => {
+      for (const [messageID, parts] of partsByMessageID.entries()) {
+        const nextParts = parts.map((part) =>
+          part.kind === "assistant-text" && part.running
+            ? { ...part, running: false }
+            : part
+        );
+        partsByMessageID.set(messageID, nextParts);
       }
-
-      return items;
-    },
-    []
-  );
+    });
+  }, [mutateMessageState]);
 
   const rebuildSessionUsageFromStoredMessages = useCallback(
     (storedMessages: Array<StoredMessage>) => {
@@ -1277,7 +1569,7 @@ export default function AgentPage() {
 
     if (!latestAssistant) return "";
 
-    return latestAssistant.parts
+    return sortStoredParts(latestAssistant.parts)
       .filter(
         (part): part is Extract<Part, { type: "text" }> => part.type === "text"
       )
@@ -1285,201 +1577,144 @@ export default function AgentPage() {
       .join("");
   }, []);
 
-  const rebuildEventCachesFromStoredMessages = useCallback(
-    (storedMessages: Array<StoredMessage>) => {
+  const rebuildEventCachesFromMessageState = useCallback(
+    (
+      messages: Array<MessageEntry>,
+      partsByMessageID: Map<string, Array<MessagePartEntry>>
+    ) => {
       messageRoleByIDRef.current.clear();
       partTextSeenRef.current.clear();
       toolStateSeenRef.current.clear();
-      toolCardByCallIDRef.current.clear();
       activeAssistantServerMessageIDRef.current = null;
-      let latestOpenTextSegment: { partID: string; itemID: string } | null = null;
 
-      for (const message of storedMessages) {
-        const role = message.info.role === "user" ? "user" : "assistant";
-        messageRoleByIDRef.current.set(message.info.id, role);
-        if (role === "assistant") {
-          activeAssistantServerMessageIDRef.current = message.info.id;
+      for (const message of sortMessageEntries(messages)) {
+        messageRoleByIDRef.current.set(message.id, message.role);
+        if (message.role === "assistant") {
+          activeAssistantServerMessageIDRef.current = message.id;
         }
 
-        for (const part of message.parts) {
-          if (part.type === "text") {
-            partTextSeenRef.current.set(part.id, part.text);
-            latestOpenTextSegment = {
-              partID: part.id,
-              itemID: `history-text-${part.id}`,
-            };
+        const parts = sortMessagePartEntries(partsByMessageID.get(message.id) ?? []);
+        for (const part of parts) {
+          if (part.kind === "assistant-text") {
+            partTextSeenRef.current.set(part.partID, part.text);
             continue;
           }
 
-          if (part.type === "tool") {
-            toolStateSeenRef.current.set(part.id, getToolSignature(part));
-            toolCardByCallIDRef.current.set(
-              String(part.callID ?? part.id),
-              `history-tool-${part.id}`
-            );
-          }
-        }
-      }
-
-      return latestOpenTextSegment;
-    },
-    []
-  );
-
-  const syncTimelineCaches = useCallback(
-    (
-      items: Array<TimelineItem>,
-      openTextSegment: { partID: string; itemID: string } | null
-    ) => {
-      partTextSeenRef.current.clear();
-      toolStateSeenRef.current.clear();
-      toolCardByCallIDRef.current.clear();
-
-      for (const item of items) {
-        if (item.kind === "assistant-text") {
-          partTextSeenRef.current.set(item.partID, item.text);
-          continue;
-        }
-
-        if (item.kind === "tool") {
-          toolCardByCallIDRef.current.set(item.toolCall.toolCallId, item.id);
           toolStateSeenRef.current.set(
-            item.partID,
-            getToolCallCacheSignature(item.toolCall)
+            part.partID,
+            getToolCallCacheSignature(part.toolCall)
           );
         }
       }
-
-      openTextSegmentRef.current = openTextSegment;
     },
     []
   );
 
-  const reconcileTimelineWithStoredMessages = useCallback(
+  const reconcileMessageStateWithStoredMessages = useCallback(
     (
       storedMessages: Array<StoredMessage>,
       preserveLive: boolean
     ): {
-      timeline: Array<TimelineItem>;
+      messages: Array<MessageEntry>;
+      partsByMessageID: Map<string, Array<MessagePartEntry>>;
       latestAssistantText: string;
-      openTextSegment: { partID: string; itemID: string } | null;
     } => {
-      const { text: latestAssistantText, lastTextPartID } =
-        getLatestAssistantSnapshot(storedMessages);
-      const nextTimeline = buildTimelineFromStoredMessages(storedMessages);
-      const textIndexByPartID = new Map<string, number>();
-      const toolIndexByCallID = new Map<string, number>();
+      const nextState = buildMessageStateFromStoredMessages(storedMessages);
 
-      nextTimeline.forEach((item, index) => {
-        if (item.kind === "assistant-text") {
-          textIndexByPartID.set(item.partID, index);
-          return;
-        }
+      if (!preserveLive) return nextState;
 
-        if (item.kind === "tool") {
-          toolIndexByCallID.set(item.toolCall.toolCallId, index);
-        }
-      });
+      const storedMessageIDs = new Set(nextState.messages.map((message) => message.id));
 
-      let openTextSegment =
-        lastTextPartID === null
-          ? null
-          : {
-              partID: lastTextPartID,
-              itemID: `history-text-${lastTextPartID}`,
-            };
-
-      if (!preserveLive) {
-        return { timeline: nextTimeline, latestAssistantText, openTextSegment };
-      }
-
-      const previousUserCount = timelineRef.current.reduce(
-        (count, item) => (item.kind === "user" ? count + 1 : count),
-        0
-      );
-      const storedUserCount = nextTimeline.reduce(
-        (count, item) => (item.kind === "user" ? count + 1 : count),
-        0
-      );
-      const userIDsToPreserve = new Set(
-        timelineRef.current
-          .filter(
-            (item): item is Extract<TimelineItem, { kind: "user" }> =>
-              item.kind === "user" && !item.id.startsWith("history-user-")
-          )
-          .slice(-Math.max(0, previousUserCount - storedUserCount))
-          .map((item) => item.id)
-      );
-
-      for (const item of timelineRef.current) {
-        if (item.kind === "user") {
-          if (item.id.startsWith("history-user-")) continue;
-          if (userIDsToPreserve.has(item.id)) nextTimeline.push(item);
+      for (const message of messageEntriesRef.current) {
+        if (message.role === "user") {
+          if (!storedMessageIDs.has(message.id)) {
+            upsertMessageEntry(nextState.messages, message);
+            storedMessageIDs.add(message.id);
+          }
           continue;
         }
 
-        if (item.kind === "assistant-text") {
-          if (!item.running) continue;
+        const liveParts = messagePartsByMessageIDRef.current.get(message.id);
+        if (!liveParts?.length) continue;
 
-          const existingIndex = textIndexByPartID.get(item.partID);
-          if (existingIndex === undefined) {
-            nextTimeline.push(item);
-            textIndexByPartID.set(item.partID, nextTimeline.length - 1);
-            openTextSegment = { partID: item.partID, itemID: item.id };
+        if (!storedMessageIDs.has(message.id)) {
+          upsertMessageEntry(nextState.messages, message);
+          storedMessageIDs.add(message.id);
+          nextState.partsByMessageID.set(message.id, [...liveParts]);
+          continue;
+        }
+
+        const storedParts = nextState.partsByMessageID.get(message.id) ?? [];
+        const mergedParts = [...storedParts];
+
+        for (const livePart of liveParts) {
+          const existingIndex = mergedParts.findIndex(
+            (storedPart) => storedPart.partID === livePart.partID
+          );
+          if (existingIndex < 0) {
+            mergedParts.push(livePart);
             continue;
           }
 
-          const existingItem = nextTimeline[existingIndex];
-          if (existingItem.kind !== "assistant-text") continue;
+          const storedPart = mergedParts[existingIndex];
+          if (storedPart.kind === "tool" && livePart.kind === "tool") {
+            mergedParts[existingIndex] = {
+              ...storedPart,
+              toolCall: preferMoreCompleteToolCall(storedPart.toolCall, livePart.toolCall),
+            };
+            continue;
+          }
 
-          nextTimeline[existingIndex] = {
-            ...existingItem,
-            text: existingItem.text,
-            running: true,
-          };
-          openTextSegment = {
-            partID: item.partID,
-            itemID: nextTimeline[existingIndex].id,
-          };
-          continue;
+          if (
+            storedPart.kind === "assistant-text" &&
+            livePart.kind === "assistant-text"
+          ) {
+            const mergedText = livePart.text.startsWith(storedPart.text)
+              ? livePart.text
+              : storedPart.text.startsWith(livePart.text)
+                ? storedPart.text
+                : storedPart.text;
+
+            mergedParts[existingIndex] = {
+              ...storedPart,
+              text: mergedText,
+              running: storedPart.running || livePart.running,
+            };
+          }
         }
 
-        const existingIndex = toolIndexByCallID.get(item.toolCall.toolCallId);
-        if (existingIndex === undefined) {
-          nextTimeline.push(item);
-          toolIndexByCallID.set(item.toolCall.toolCallId, nextTimeline.length - 1);
-          continue;
-        }
-
-        const existingItem = nextTimeline[existingIndex];
-        if (existingItem.kind !== "tool") continue;
-
-        nextTimeline[existingIndex] = {
-          ...existingItem,
-          toolCall: preferMoreCompleteToolCall(existingItem.toolCall, item.toolCall),
-        };
+        nextState.partsByMessageID.set(message.id, mergedParts);
       }
 
-      return { timeline: nextTimeline, latestAssistantText, openTextSegment };
+      const latestAssistantMessage = [...sortMessageEntries(nextState.messages)]
+        .reverse()
+        .find((message) => message.role === "assistant");
+
+      return {
+        ...nextState,
+        latestAssistantText: latestAssistantMessage
+          ? getAssistantTextFromMessageParts(
+              nextState.partsByMessageID.get(latestAssistantMessage.id)
+            )
+          : "",
+      };
     },
-    [buildTimelineFromStoredMessages]
+    []
   );
 
   const applySessionSnapshot = useCallback(
     (storedMessages: Array<StoredMessage>, preserveLive: boolean) => {
-      const reconciled = reconcileTimelineWithStoredMessages(storedMessages, preserveLive);
-      timelineRef.current = reconciled.timeline;
-      setTimeline(reconciled.timeline);
+      const reconciled = reconcileMessageStateWithStoredMessages(storedMessages, preserveLive);
+      replaceMessageState(reconciled.messages, reconciled.partsByMessageID);
       rebuildSessionUsageFromStoredMessages(storedMessages);
-      rebuildEventCachesFromStoredMessages(storedMessages);
-      syncTimelineCaches(reconciled.timeline, reconciled.openTextSegment);
+      rebuildEventCachesFromMessageState(reconciled.messages, reconciled.partsByMessageID);
       return reconciled.latestAssistantText;
     },
     [
-      reconcileTimelineWithStoredMessages,
-      rebuildEventCachesFromStoredMessages,
+      reconcileMessageStateWithStoredMessages,
+      rebuildEventCachesFromMessageState,
       rebuildSessionUsageFromStoredMessages,
-      syncTimelineCaches,
+      replaceMessageState,
     ]
   );
 
@@ -1503,8 +1738,8 @@ export default function AgentPage() {
         if (sessionIDRef.current !== currentSessionID) return;
         const storedMessages = (messagesResult.data ?? []) as Array<StoredMessage>;
         const currentRun = activeRunRef.current;
-        const localUserCount = timelineRef.current.reduce(
-          (count, item) => (item.kind === "user" ? count + 1 : count),
+        const localUserCount = messageEntriesRef.current.reduce(
+          (count, message) => (message.role === "user" ? count + 1 : count),
           0
         );
         const preserveLive =
@@ -1577,8 +1812,8 @@ export default function AgentPage() {
           }
 
           const storedMessages = (messagesResult.data ?? []) as Array<StoredMessage>;
-          const localUserCount = timelineRef.current.reduce(
-            (count, item) => (item.kind === "user" ? count + 1 : count),
+          const localUserCount = messageEntriesRef.current.reduce(
+            (count, message) => (message.role === "user" ? count + 1 : count),
             0
           );
           const snapshotCapturedActiveRun = didSnapshotCaptureActiveRun(
@@ -1617,7 +1852,16 @@ export default function AgentPage() {
           }
           if (fallbackText) {
             currentRun.assistantText = fallbackText;
-            appendAssistantTextChunk(`fallback-${targetRunID}`, fallbackText, false);
+            const fallbackMessageID =
+              activeAssistantServerMessageIDRef.current ??
+              createAscendingIdentifier("message");
+            upsertAssistantMessageEntry(fallbackMessageID);
+            upsertAssistantTextPart(
+              fallbackMessageID,
+              `fallback-${targetRunID}`,
+              fallbackText,
+              false
+            );
           }
         }
 
@@ -1663,11 +1907,12 @@ export default function AgentPage() {
     },
     [
       applySessionSnapshot,
-      appendAssistantTextChunk,
       appendTrace,
       getLatestAssistantText,
       markAssistantCardsComplete,
       scheduleInteractiveRefresh,
+      upsertAssistantMessageEntry,
+      upsertAssistantTextPart,
     ]
   );
 
@@ -1697,14 +1942,13 @@ export default function AgentPage() {
       }
 
       const statusBySession = statusResult.data ?? {};
-      const status = statusBySession[targetSessionID];
+      const status = statusBySession[targetSessionID] ?? { type: "idle" };
       if (status?.type === "busy" || status?.type === "retry") {
         currentRun.startObserved = true;
         return;
       }
 
-      if (status?.type === "idle") {
-        if (!currentRun.pollRecoveryEligible) return;
+      if (status.type === "idle") {
         void finalizeActiveRun(targetRunID, targetSessionID, "status-poll");
       }
     } catch (error) {
@@ -1715,7 +1959,7 @@ export default function AgentPage() {
   }, [appendTrace, finalizeActiveRun]);
 
   const processEvent = useCallback(
-    (event: Event) => {
+    (event: AgentEvent) => {
       const currentSessionID = sessionIDRef.current;
       const activeRun = activeRunRef.current;
       const eventType = event.type as string;
@@ -1725,62 +1969,126 @@ export default function AgentPage() {
         if (!currentSessionID || info.sessionID !== currentSessionID) return;
 
         messageRoleByIDRef.current.set(info.id, info.role);
-        if (info.role === "assistant") {
-          activeAssistantServerMessageIDRef.current = info.id;
+        const createdAt = getCreatedAt(info as Record<string, unknown>);
+        if (info.role === "user") {
+          mutateMessageState((messages) => {
+            const existing = findMessageEntry(messages, info.id);
+            upsertMessageEntry(messages, {
+              id: info.id,
+              role: "user",
+              parentID: undefined,
+              createdAt,
+              text: existing?.role === "user" ? existing.text : "",
+              localOnly: false,
+            });
+          });
+          return;
+        }
 
-          const usageSnapshot = parseAssistantUsageFromInfo(info as Record<string, unknown>);
-          if (usageSnapshot) {
-            upsertAssistantUsage(usageSnapshot);
-          }
+        upsertAssistantMessageEntry(
+          info.id,
+          createdAt,
+          "parentID" in info && typeof info.parentID === "string"
+            ? String(info.parentID)
+            : undefined
+        );
+        activeAssistantServerMessageIDRef.current = info.id;
 
-          if (activeRun && activeRun.sessionID === info.sessionID) {
-            activeRun.startObserved = true;
-            const provider = "providerID" in info ? String(info.providerID) : "unknown";
-            const model = "modelID" in info ? String(info.modelID) : "unknown";
-            activeRun.model = `${provider}/${model}`;
+        const usageSnapshot = parseAssistantUsageFromInfo(info as Record<string, unknown>);
+        if (usageSnapshot) {
+          upsertAssistantUsage(usageSnapshot);
+        }
 
-            const assistantError = getAssistantError(
-              "error" in info ? info.error : undefined
-            );
-            if (assistantError) appendTrace(`assistant error: ${assistantError}`);
-          }
+        if (activeRun && activeRun.sessionID === info.sessionID) {
+          activeRun.startObserved = true;
+          const provider = "providerID" in info ? String(info.providerID) : "unknown";
+          const model = "modelID" in info ? String(info.modelID) : "unknown";
+          activeRun.model = `${provider}/${model}`;
+
+          const assistantError = getAssistantError(
+            "error" in info ? info.error : undefined
+          );
+          if (assistantError) appendTrace(`assistant error: ${assistantError}`);
+        }
+        return;
+      }
+
+      if (event.type === "message.part.delta") {
+        const { sessionID, messageID, partID, field, delta } = event.properties;
+        if (!currentSessionID || sessionID !== currentSessionID) return;
+        if (field !== "text" || !delta) return;
+        if (activeRun && activeRun.sessionID === sessionID) {
+          activeRun.startObserved = true;
+        }
+
+        const messageRole = messageRoleByIDRef.current.get(messageID);
+        const existingMessage = findMessageEntry(messageEntriesRef.current, messageID);
+        if (messageRole === "user" || existingMessage?.role === "user") {
+          mutateMessageState((messages) => {
+            updateUserMessageText(messages, messageID, delta, "append");
+          });
+          return;
+        }
+
+        activeAssistantServerMessageIDRef.current = messageID;
+        applyAssistantTextDelta(messageID, partID, delta);
+        const nextText = getAssistantTextForMessage(messageID);
+        partTextSeenRef.current.set(partID, nextText);
+        if (activeRun && activeRun.sessionID === sessionID) {
+          activeRun.assistantText = nextText;
+          setRunUiPhase("assistant-output");
         }
         return;
       }
 
       if (event.type === "message.part.updated") {
-        const { part, delta } = event.properties;
+        const {
+          part,
+          delta,
+        } = event.properties as {
+          part: AgentPart;
+          delta?: string;
+        };
         if (!currentSessionID || part.sessionID !== currentSessionID) return;
         if (activeRun && activeRun.sessionID === part.sessionID) {
           activeRun.startObserved = true;
         }
 
         if (part.type === "text") {
-          if (!activeRun || activeRun.sessionID !== part.sessionID) return;
-
           const messageRole = messageRoleByIDRef.current.get(part.messageID);
-          if (messageRole === "user") return;
+          const existingMessage = findMessageEntry(messageEntriesRef.current, part.messageID);
+          if (messageRole === "user" || existingMessage?.role === "user") {
+            mutateMessageState((messages) => {
+              updateUserMessageText(messages, part.messageID, part.text, "replace");
+            });
+            return;
+          }
           activeAssistantServerMessageIDRef.current = part.messageID;
 
           if (typeof delta === "string" && delta.length > 0) {
-            activeRun.assistantText += delta;
-            setRunUiPhase("assistant-output");
-            appendAssistantTextChunk(part.id, delta, true);
+            applyAssistantTextDelta(part.messageID, part.id, delta);
+            const nextText = getAssistantTextForMessage(part.messageID);
+            partTextSeenRef.current.set(part.id, nextText);
+            if (activeRun && activeRun.sessionID === part.sessionID) {
+              activeRun.assistantText = nextText;
+              setRunUiPhase("assistant-output");
+            }
             return;
           }
 
-          const previousText = partTextSeenRef.current.get(part.id) ?? "";
-          const append = part.text.startsWith(previousText)
-            ? part.text.slice(previousText.length)
-            : part.text;
-
-          if (append.length > 0) {
-            activeRun.assistantText += append;
-            setRunUiPhase("assistant-output");
-            appendAssistantTextChunk(part.id, append, true);
-          }
-
+          upsertAssistantTextPart(
+            part.messageID,
+            part.id,
+            part.text,
+            isTextPartRunning(part)
+          );
           partTextSeenRef.current.set(part.id, part.text);
+          if (activeRun && activeRun.sessionID === part.sessionID) {
+            activeRun.assistantText = getAssistantTextForMessage(part.messageID);
+            if (part.text || isTextPartRunning(part)) {
+              setRunUiPhase("assistant-output");
+            }
+          }
           return;
         }
 
@@ -1791,15 +2099,19 @@ export default function AgentPage() {
             appendTrace(formatToolUpdate(part));
           }
 
+          const previous =
+            activeRun && activeRun.sessionID === part.sessionID
+              ? activeRun.toolCalls.get(String(part.callID ?? part.id))
+              : undefined;
+          const next = toRuntimeToolCall(part, previous);
+          upsertToolCard(part.messageID, part.id, next);
+
           if (activeRun && activeRun.sessionID === part.sessionID) {
-            const previous = activeRun.toolCalls.get(String(part.callID ?? part.id));
-            const next = toRuntimeToolCall(part, previous);
             activeRun.toolCalls.set(next.toolCallId, next);
             const hasRunningToolCalls = [...activeRun.toolCalls.values()].some(
               (toolCall) => toolCall.status === "pending" || toolCall.status === "running"
             );
             setRunUiPhase(hasRunningToolCalls ? "tool-active" : "thinking");
-            upsertToolCard(part.id, next);
           }
 
           if (part.tool === "question" || part.tool === "permission") {
@@ -1835,6 +2147,33 @@ export default function AgentPage() {
           );
         }
 
+        return;
+      }
+
+      if (event.type === "message.part.removed") {
+        if (!currentSessionID || event.properties.sessionID !== currentSessionID) return;
+
+        mutateMessageState((_, partsByMessageID) => {
+          const parts = partsByMessageID.get(event.properties.messageID);
+          if (!parts) return;
+          const nextParts = parts.filter((part) => part.partID !== event.properties.partID);
+          if (nextParts.length === 0) {
+            partsByMessageID.delete(event.properties.messageID);
+            return;
+          }
+          partsByMessageID.set(event.properties.messageID, nextParts);
+        });
+        return;
+      }
+
+      if (event.type === "message.removed") {
+        if (!currentSessionID || event.properties.sessionID !== currentSessionID) return;
+
+        mutateMessageState((messages, partsByMessageID) => {
+          const nextMessages = messages.filter((message) => message.id !== event.properties.messageID);
+          messages.splice(0, messages.length, ...nextMessages);
+          partsByMessageID.delete(event.properties.messageID);
+        });
         return;
       }
 
@@ -1928,8 +2267,21 @@ export default function AgentPage() {
       }
 
       if (event.type === "permission.replied") {
+        const details = event.properties as Record<string, unknown>;
+        const requestID =
+          typeof details.permissionID === "string"
+            ? details.permissionID
+            : typeof details.requestID === "string"
+              ? details.requestID
+              : "unknown";
+        const response =
+          typeof details.response === "string"
+            ? details.response
+            : typeof details.reply === "string"
+              ? details.reply
+              : "unknown";
         appendTrace(
-          `permission replied (${event.properties.permissionID}): ${event.properties.response}`
+          `permission replied (${requestID}): ${response}`
         );
         scheduleInteractiveRefresh();
         return;
@@ -1953,6 +2305,14 @@ export default function AgentPage() {
           appendTrace(`session status: ${event.properties.status.type}`);
         }
 
+        if (
+          event.properties.status.type === "idle" &&
+          activeRun &&
+          activeRun.sessionID === event.properties.sessionID
+        ) {
+          void finalizeActiveRun(activeRun.id, event.properties.sessionID, "session.status.idle");
+        }
+
         return;
       }
 
@@ -1967,9 +2327,14 @@ export default function AgentPage() {
       }
     },
     [
+      applyAssistantTextDelta,
       appendTrace,
       finalizeActiveRun,
+      getAssistantTextForMessage,
+      mutateMessageState,
       scheduleInteractiveRefresh,
+      upsertAssistantMessageEntry,
+      upsertAssistantTextPart,
       upsertAssistantUsage,
       upsertToolCard,
     ]
@@ -2125,11 +2490,10 @@ export default function AgentPage() {
     setIsBusy(false);
     setRunUiPhase("thinking");
 
-    messageRoleByIDRef.current.clear();
+    messageEntriesRef.current = [];
+    messagePartsByMessageIDRef.current = new Map();
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
-    toolCardByCallIDRef.current.clear();
-    openTextSegmentRef.current = null;
     activeAssistantServerMessageIDRef.current = null;
     activeRunRef.current = null;
     runCompletionInFlightRef.current = null;
@@ -2155,13 +2519,11 @@ export default function AgentPage() {
       }
 
       const storedMessages = (messagesResult.data ?? []) as Array<StoredMessage>;
-      const nextTimeline = buildTimelineFromStoredMessages(storedMessages);
+      const nextState = buildMessageStateFromStoredMessages(storedMessages);
       rebuildSessionUsageFromStoredMessages(storedMessages);
-      const nextOpenTextSegment = rebuildEventCachesFromStoredMessages(storedMessages);
+      rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
       shouldAutoScrollRef.current = true;
-      setTimeline(nextTimeline);
-      timelineRef.current = nextTimeline;
-      syncTimelineCaches(nextTimeline, nextOpenTextSegment);
+      replaceMessageState(nextState.messages, nextState.partsByMessageID);
       sessionIDRef.current = selectedSessionID;
       setSessionID(selectedSessionID);
       appendTrace(`session resumed: ${selectedSessionID}`);
@@ -2173,16 +2535,15 @@ export default function AgentPage() {
     }
   }, [
     appendTrace,
-    buildTimelineFromStoredMessages,
-    rebuildEventCachesFromStoredMessages,
+    rebuildEventCachesFromMessageState,
     rebuildSessionUsageFromStoredMessages,
     ensureClients,
     ensureEventStream,
+    replaceMessageState,
     refreshModelContextLimits,
     resetSessionTokenTracking,
     scheduleInteractiveRefresh,
     selectedSessionID,
-    syncTimelineCaches,
   ]);
 
   useEffect(() => {
@@ -2215,6 +2576,10 @@ export default function AgentPage() {
 
   useEffect(
     () => () => {
+      if (timelinePublishFrameRef.current !== null) {
+        window.cancelAnimationFrame(timelinePublishFrameRef.current);
+        timelinePublishFrameRef.current = null;
+      }
       eventStreamSupervisorAbortRef.current?.abort();
       eventStreamSupervisorAbortRef.current = null;
       eventStreamAbortRef.current?.abort();
@@ -2269,24 +2634,23 @@ export default function AgentPage() {
   const sendPrompt = useCallback(async () => {
     const prompt = inputText.trim();
     if (!prompt || isBusy) return;
+    const userMessageID = createAscendingIdentifier("message");
+    const userCreatedAt = Date.now();
 
     setInputText("");
     setErrorText(null);
     setPendingQuestions([]);
     setPendingPermissions([]);
 
-    messageRoleByIDRef.current.clear();
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
-    toolCardByCallIDRef.current.clear();
-    openTextSegmentRef.current = null;
     activeAssistantServerMessageIDRef.current = null;
 
     appendTrace(`prompt sent (${prompt.length} chars)`);
 
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
-    appendUserCard(prompt);
+    appendUserCard(userMessageID, prompt, userCreatedAt, true);
 
     setIsBusy(true);
     setRunUiPhase("thinking");
@@ -2327,6 +2691,7 @@ export default function AgentPage() {
       await client.session.promptAsync({
         path: { id: liveSessionID },
         body: {
+          messageID: userMessageID,
           parts: [{ type: "text", text: prompt }],
         },
       });
@@ -2516,11 +2881,11 @@ export default function AgentPage() {
 
     sessionIDRef.current = null;
     activeRunRef.current = null;
+    messageEntriesRef.current = [];
+    messagePartsByMessageIDRef.current = new Map();
     messageRoleByIDRef.current.clear();
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
-    toolCardByCallIDRef.current.clear();
-    openTextSegmentRef.current = null;
     activeAssistantServerMessageIDRef.current = null;
     resetSessionTokenTracking();
 
