@@ -105,6 +105,7 @@ type TimelineItem =
       id: string;
       kind: "assistant-text";
       partID: string;
+      sortIndex?: number;
       text: string;
       running: boolean;
     }
@@ -112,6 +113,7 @@ type TimelineItem =
       id: string;
       kind: "tool";
       partID: string;
+      sortIndex?: number;
       toolCall: RuntimeToolCall;
     };
 
@@ -136,6 +138,13 @@ type ActiveRun = {
   toolCalls: Map<string, RuntimeToolCall>;
   finish: () => void;
   fail: (error: Error) => void;
+};
+
+type PendingOptimisticUserMessage = {
+  localMessageID: string;
+  sessionID: string | null;
+  text: string;
+  createdAt: number;
 };
 
 type SessionOption = {
@@ -768,7 +777,7 @@ function compareAscending(left: string, right: string): number {
 }
 
 function sortStoredParts(parts: Array<Part>): Array<Part> {
-  return [...parts].sort((left, right) => compareAscending(left.id, right.id));
+  return [...parts];
 }
 
 function sortMessageEntries(entries: Array<MessageEntry>): Array<MessageEntry> {
@@ -786,7 +795,17 @@ function sortMessageEntries(entries: Array<MessageEntry>): Array<MessageEntry> {
 }
 
 function sortMessagePartEntries(parts: Array<MessagePartEntry>): Array<MessagePartEntry> {
-  return [...parts].sort((left, right) => compareAscending(left.partID, right.partID));
+  return [...parts].sort((left, right) => {
+    if (typeof left.sortIndex === "number" && typeof right.sortIndex === "number") {
+      if (left.sortIndex !== right.sortIndex) {
+        return left.sortIndex - right.sortIndex;
+      }
+      return compareAscending(left.partID, right.partID);
+    }
+    if (typeof left.sortIndex === "number") return -1;
+    if (typeof right.sortIndex === "number") return 1;
+    return compareAscending(left.partID, right.partID);
+  });
 }
 
 function buildTimelineFromMessageState(
@@ -858,10 +877,21 @@ function updateUserMessageText(
 function upsertMessagePart(parts: Array<MessagePartEntry>, nextPart: MessagePartEntry) {
   const index = parts.findIndex((part) => part.partID === nextPart.partID);
   if (index >= 0) {
-    parts[index] = nextPart;
+    const current = parts[index];
+    parts[index] = {
+      ...current,
+      ...nextPart,
+      sortIndex: nextPart.sortIndex ?? current.sortIndex,
+    };
     return;
   }
-  parts.push(nextPart);
+  const nextSortIndex =
+    nextPart.sortIndex ??
+    parts.reduce((max, part) => Math.max(max, part.sortIndex ?? -1), -1) + 1;
+  parts.push({
+    ...nextPart,
+    sortIndex: nextSortIndex,
+  });
 }
 
 function getAssistantTextFromMessageParts(parts: Array<MessagePartEntry> | undefined): string {
@@ -1016,14 +1046,15 @@ function buildMessageStateFromStoredMessages(storedMessages: Array<StoredMessage
     });
 
     const parts: Array<MessagePartEntry> = [];
-    for (const part of sortStoredParts(message.parts)) {
+    for (const [partIndex, part] of sortStoredParts(message.parts).entries()) {
       if (part.type === "text") {
         parts.push({
           id: `assistant-text-${part.id}`,
           kind: "assistant-text",
           partID: part.id,
+          sortIndex: partIndex,
           text: part.text,
-          running: isTextPartRunning(part),
+          running: false,
         });
         continue;
       }
@@ -1033,6 +1064,7 @@ function buildMessageStateFromStoredMessages(storedMessages: Array<StoredMessage
           id: `tool-${part.id}`,
           kind: "tool",
           partID: part.id,
+          sortIndex: partIndex,
           toolCall: toRuntimeToolCall(part),
         });
       }
@@ -1110,6 +1142,7 @@ export default function AgentPage() {
   const assistantUsageByMessageIDRef = useRef<Map<string, AssistantUsageSnapshot>>(new Map());
   const modelContextLimitByKeyRef = useRef<Map<string, number>>(new Map());
   const modelCostByKeyRef = useRef<Map<string, ModelCostInfo>>(new Map());
+  const pendingOptimisticUserRef = useRef<PendingOptimisticUserMessage | null>(null);
 
   useEffect(() => {
     sessionIDRef.current = sessionID;
@@ -1296,6 +1329,88 @@ export default function AgentPage() {
       });
     },
     [mutateMessageState]
+  );
+
+  const reconcileOptimisticUserMessage = useCallback(
+    (serverMessageID: string, sessionID: string, createdAt: number) => {
+      const pendingOptimisticUser = pendingOptimisticUserRef.current;
+      if (
+        !pendingOptimisticUser ||
+        (pendingOptimisticUser.sessionID !== null &&
+          pendingOptimisticUser.sessionID !== sessionID)
+      ) {
+        return false;
+      }
+
+      let reconciled = false;
+      mutateMessageState((messages, partsByMessageID) => {
+        const localIndex = messages.findIndex(
+          (message) =>
+            message.id === pendingOptimisticUser.localMessageID &&
+            message.role === "user" &&
+            message.localOnly
+        );
+        if (localIndex < 0) return;
+
+        const localMessage = messages[localIndex];
+        const serverIndex = messages.findIndex((message) => message.id === serverMessageID);
+        if (serverIndex >= 0) {
+          const serverMessage = messages[serverIndex];
+          if (serverMessage.role === "user") {
+            messages[serverIndex] = {
+              ...serverMessage,
+              createdAt,
+              text: serverMessage.text || localMessage.text,
+              localOnly: false,
+            };
+          }
+          messages.splice(localIndex, 1);
+        } else {
+          messages[localIndex] = {
+            ...localMessage,
+            id: serverMessageID,
+            createdAt,
+            localOnly: false,
+          };
+        }
+
+        const localParts = partsByMessageID.get(pendingOptimisticUser.localMessageID);
+        if (localParts && !partsByMessageID.has(serverMessageID)) {
+          partsByMessageID.set(serverMessageID, localParts);
+        }
+        partsByMessageID.delete(pendingOptimisticUser.localMessageID);
+        reconciled = true;
+      });
+
+      if (!reconciled) return false;
+
+      messageRoleByIDRef.current.delete(pendingOptimisticUser.localMessageID);
+      messageRoleByIDRef.current.set(serverMessageID, "user");
+      pendingOptimisticUserRef.current = null;
+      return true;
+    },
+    [mutateMessageState]
+  );
+
+  const maybeReconcileOptimisticUserFromTextPart = useCallback(
+    (serverMessageID: string, sessionID: string, text: string) => {
+      const pendingOptimisticUser = pendingOptimisticUserRef.current;
+      if (
+        !pendingOptimisticUser ||
+        (pendingOptimisticUser.sessionID !== null &&
+          pendingOptimisticUser.sessionID !== sessionID) ||
+        text !== pendingOptimisticUser.text
+      ) {
+        return false;
+      }
+
+      return reconcileOptimisticUserMessage(
+        serverMessageID,
+        sessionID,
+        pendingOptimisticUser.createdAt
+      );
+    },
+    [reconcileOptimisticUserMessage]
   );
 
   const upsertAssistantMessageEntry = useCallback(
@@ -1620,6 +1735,16 @@ export default function AgentPage() {
       latestAssistantText: string;
     } => {
       const nextState = buildMessageStateFromStoredMessages(storedMessages);
+      const pendingOptimisticUser = pendingOptimisticUserRef.current;
+      const matchedPendingStoredUserID =
+        pendingOptimisticUser === null
+          ? null
+          : [...nextState.messages]
+              .reverse()
+              .find(
+                (message) =>
+                  message.role === "user" && message.text === pendingOptimisticUser.text
+              )?.id ?? null;
 
       if (!preserveLive) return nextState;
 
@@ -1627,6 +1752,14 @@ export default function AgentPage() {
 
       for (const message of messageEntriesRef.current) {
         if (message.role === "user") {
+          if (
+            pendingOptimisticUser &&
+            matchedPendingStoredUserID &&
+            message.id === pendingOptimisticUser.localMessageID
+          ) {
+            pendingOptimisticUserRef.current = null;
+            continue;
+          }
           if (!storedMessageIDs.has(message.id)) {
             upsertMessageEntry(nextState.messages, message);
             storedMessageIDs.add(message.id);
@@ -1971,6 +2104,9 @@ export default function AgentPage() {
         messageRoleByIDRef.current.set(info.id, info.role);
         const createdAt = getCreatedAt(info as Record<string, unknown>);
         if (info.role === "user") {
+          if (reconcileOptimisticUserMessage(info.id, info.sessionID, createdAt)) {
+            return;
+          }
           mutateMessageState((messages) => {
             const existing = findMessageEntry(messages, info.id);
             upsertMessageEntry(messages, {
@@ -2055,6 +2191,13 @@ export default function AgentPage() {
         }
 
         if (part.type === "text") {
+          if (maybeReconcileOptimisticUserFromTextPart(part.messageID, part.sessionID, part.text)) {
+            mutateMessageState((messages) => {
+              updateUserMessageText(messages, part.messageID, part.text, "replace");
+            });
+            return;
+          }
+
           const messageRole = messageRoleByIDRef.current.get(part.messageID);
           const existingMessage = findMessageEntry(messageEntriesRef.current, part.messageID);
           if (messageRole === "user" || existingMessage?.role === "user") {
@@ -2331,7 +2474,9 @@ export default function AgentPage() {
       appendTrace,
       finalizeActiveRun,
       getAssistantTextForMessage,
+      maybeReconcileOptimisticUserFromTextPart,
       mutateMessageState,
+      reconcileOptimisticUserMessage,
       scheduleInteractiveRefresh,
       upsertAssistantMessageEntry,
       upsertAssistantTextPart,
@@ -2492,6 +2637,7 @@ export default function AgentPage() {
 
     messageEntriesRef.current = [];
     messagePartsByMessageIDRef.current = new Map();
+    pendingOptimisticUserRef.current = null;
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
@@ -2634,7 +2780,7 @@ export default function AgentPage() {
   const sendPrompt = useCallback(async () => {
     const prompt = inputText.trim();
     if (!prompt || isBusy) return;
-    const userMessageID = createAscendingIdentifier("message");
+    const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
 
     setInputText("");
@@ -2651,6 +2797,12 @@ export default function AgentPage() {
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
     appendUserCard(userMessageID, prompt, userCreatedAt, true);
+    pendingOptimisticUserRef.current = {
+      localMessageID: userMessageID,
+      sessionID: null,
+      text: prompt,
+      createdAt: userCreatedAt,
+    };
 
     setIsBusy(true);
     setRunUiPhase("thinking");
@@ -2686,12 +2838,17 @@ export default function AgentPage() {
         fail,
         finish,
       };
+      pendingOptimisticUserRef.current = {
+        localMessageID: userMessageID,
+        sessionID: liveSessionID,
+        text: prompt,
+        createdAt: userCreatedAt,
+      };
       streamLastEventAtRef.current = Date.now();
 
       await client.session.promptAsync({
         path: { id: liveSessionID },
         body: {
-          messageID: userMessageID,
           parts: [{ type: "text", text: prompt }],
         },
       });
@@ -2699,6 +2856,7 @@ export default function AgentPage() {
       scheduleInteractiveRefresh(0);
     } catch (error) {
       const message = toErrorMessage(error);
+      pendingOptimisticUserRef.current = null;
       setErrorText(message);
       setIsBusy(false);
       appendTrace(`prompt error: ${message}`);
@@ -2881,6 +3039,7 @@ export default function AgentPage() {
 
     sessionIDRef.current = null;
     activeRunRef.current = null;
+    pendingOptimisticUserRef.current = null;
     messageEntriesRef.current = [];
     messagePartsByMessageIDRef.current = new Map();
     messageRoleByIDRef.current.clear();
