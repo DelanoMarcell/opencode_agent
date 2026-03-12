@@ -38,7 +38,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   Popover,
   PopoverContent,
@@ -55,6 +54,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  MatterChatSidebar,
+  type MatterChatSidebarSession,
+} from "@/components/agent-shell/matter-chat-sidebar";
 
 const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_OPENCODE_BASE_URL ?? "http://localhost:4096";
@@ -3139,36 +3142,48 @@ export default function AgentPage() {
     0
   );
   const showThinkingCard = isBusy && runUiPhase === "thinking";
+  const sidebarSessions: Array<MatterChatSidebarSession> = availableSessions.map((session) => ({
+    id: session.id,
+    title: session.title?.trim() ? session.title.trim() : "Untitled",
+    updatedLabel: new Date(session.updated || session.created).toLocaleDateString(),
+    shortID: session.id.slice(0, 8),
+  }));
 
   return (
     <main className="agent-page h-dvh overflow-hidden p-3 text-zinc-900 sm:p-4">
       <div
-        className={`agent-layout mx-auto grid h-full max-w-[1500px] gap-3 ${
-          showTrace ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "lg:grid-cols-1"
+        className={`agent-layout grid h-full gap-3 ${
+          showTrace
+            ? "lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_340px]"
+            : "lg:grid-cols-[280px_minmax(0,1fr)]"
         }`}
       >
+        <MatterChatSidebar
+          sessions={sidebarSessions}
+          selectedSessionID={selectedSessionID}
+          onSelectSession={setSelectedSessionID}
+        />
+
         <Card className="agent-panel min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">
           <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col px-0">
             <div className="flex flex-wrap items-center gap-2 px-4 pb-2 pt-4 sm:px-5">
-              <NativeSelect
-                value={selectedSessionID}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  setSelectedSessionID(event.target.value)
-                }
-                className="agent-field min-w-0 flex-1 rounded-none border-2 text-sm shadow-none"
-                disabled={isBusy || availableSessions.length === 0}
-              >
-                <NativeSelectOption value="">
-                  {availableSessions.length === 0
-                    ? "No saved sessions found"
-                    : "Select session to resume"}
-                </NativeSelectOption>
-                {availableSessions.map((session) => (
-                  <NativeSelectOption key={session.id} value={session.id}>
-                    {formatSessionOptionLabel(session)}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-600">
+                  Active Session
+                </p>
+                <p className="mt-1 truncate text-sm text-zinc-900">
+                  {selectedSessionID
+                    ? formatSessionOptionLabel(
+                        availableSessions.find((session) => session.id === selectedSessionID) ?? {
+                          id: selectedSessionID,
+                          title: "Selected session",
+                          updated: Date.now(),
+                          created: Date.now(),
+                        }
+                      )
+                    : "No session selected"}
+                </p>
+              </div>
               <Badge
                 variant="secondary"
                 className="rounded-none border px-2 py-1 text-[10px] uppercase tracking-[0.08em]"
