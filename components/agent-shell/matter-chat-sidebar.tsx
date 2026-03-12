@@ -99,11 +99,11 @@ export function MatterChatSidebar({
     <Card className="flex h-full min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">
       <CardHeader className="border-b-2 px-4 py-4">
         <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-(--ink-muted)">
             Matter Chats
           </p>
           <CardTitle className="text-base leading-tight">Folders and Working Threads</CardTitle>
-          <p className="text-xs text-zinc-700">
+          <p className="text-xs text-(--ink-soft)">
             Example matter group with current sessions shown as chats.
           </p>
         </div>
@@ -112,18 +112,18 @@ export function MatterChatSidebar({
         <ScrollArea type="always" className="h-full">
           <div className="space-y-3 p-3">
             {sessions.length === 0 ? (
-              <div className="border-2 border-dashed p-3 text-sm text-zinc-700">
+              <div className="border-2 border-dashed p-3 text-sm text-(--ink-soft)">
                 No saved sessions found.
               </div>
             ) : (
               groupedSessions.map((group) => (
-                <section key={group.code} className="border-2 bg-[#fffdf8] p-3">
+                <section key={group.code} className="border-2 bg-(--surface-light) p-3">
                   <button
                     type="button"
                     onClick={() => toggleMatter(group.code)}
                     className="flex w-full items-center justify-between gap-3 border-b pb-2 text-left"
                   >
-                    <p className="truncate text-sm font-semibold text-zinc-900">
+                    <p className="truncate text-sm font-semibold text-foreground">
                       {group.matter}
                     </p>
                     <Badge
@@ -145,12 +145,12 @@ export function MatterChatSidebar({
                             onClick={() => onSelectSession(chat.id)}
                             className={`block w-full border-2 px-3 py-3 text-left transition-colors ${
                               active
-                                ? "bg-[#d9e2ef] text-zinc-900"
-                                : "bg-transparent hover:bg-[#f5efdf]"
+                                ? "bg-(--brand-soft) text-foreground"
+                                : "bg-transparent hover:bg-(--surface-hover)"
                             }`}
                           >
                             <p className="line-clamp-2 text-sm font-medium">{chat.title}</p>
-                            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.08em] text-zinc-600">
+                            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.08em] text-(--ink-muted)">
                               <span className="truncate">{chat.shortID}</span>
                               <span className="shrink-0">{chat.updatedLabel}</span>
                             </div>

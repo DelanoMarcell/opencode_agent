@@ -1,46 +1,169 @@
 @import "tailwindcss";
 @source "../node_modules/streamdown/dist/*.js";
 
+/* ================================================================
+   DESIGN TOKENS
+   Single source of truth for the entire app.
+   ================================================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* —— Typography —— */
+  --font-sans: var(--font-geist-sans), "Aptos", "Segoe UI", sans-serif;
+  --font-heading: "Iowan Old Style", "Book Antiqua", Palatino, "Palatino Linotype", serif;
+  --font-body-serif: "Source Serif 4", "Iowan Old Style", "Book Antiqua", Palatino, "Palatino Linotype", serif;
+  --font-mono: var(--font-geist-mono), "Consolas", "Courier New", monospace;
+
+  /* —— Ink (text) —— */
+  --ink: #142233;
+  --ink-soft: #405164;
+  --ink-muted: #49596b;
+
+  /* —— Paper (backgrounds) —— */
+  --paper: #f5f1e6;
+  --paper-2: #ece4d2;
+  --paper-3: #e2d8c2;
+  --paper-warm: #e8dfcb;
+
+  /* —— Surfaces (lighter bg variants) —— */
+  --surface: #ede6d6;
+  --surface-light: #fffdf8;
+  --surface-field: #fffcf4;
+  --surface-interactive: #f0e8d9;
+  --surface-hover: #f7f0de;
+
+  /* —— Brand (primary accent) —— */
+  --brand: #1f3f69;
+  --brand-hover: #173457;
+  --brand-soft: #d9e2ef;
+  --brand-active: #bfd0e6;
+  --brand-light: #2a5089;
+  --brand-link: #204f88;
+  --brand-on: #f6f9ff;
+
+  /* —— Semantic —— */
+  --card-user: #dbe4ef;
+  --card-assistant: #fffdf7;
+  --card-tool: var(--paper-2);
+  --avatar-tool: #dcd0b6;
+  --danger: #8a1f1f;
+  --danger-soft: #fdf0f0;
+  --scrollbar: #8ea0b2;
+  --scrollbar-hover: #6f89a7;
+
+  /* —— Border —— */
+  --border: #142233;
+
+  /* —— Shadows (rgba of --ink) —— */
+  --shadow-ink: 20, 34, 51;
+  --shadow-brand: 31, 63, 105;
+
+  /* —— Backgrounds —— */
+  --bg-gradient: linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 26%, var(--paper) 100%);
+  --bg-promo: linear-gradient(135deg, var(--ink) 0%, var(--brand) 60%, var(--brand-light) 100%);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), "Aptos", "Segoe UI", sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
 }
 
-.agent-page {
-  --ink: #142233;
-  --ink-soft: #405164;
-  --paper: #f5f1e6;
-  --paper-2: #ece4d2;
-  --paper-3: #e2d8c2;
-  --brand: #1f3f69;
-  --brand-soft: #d9e2ef;
-  --danger: #8a1f1f;
-  --border-color: #142233;
-  --muted-surface: #ede6d6;
-  --muted-text: #49596b;
-  --link-color: #204f88;
 
+/* ================================================================
+   SHARED COMPONENT CLASSES
+   Registered in Tailwind's component layer so they survive
+   processing and sit at the right cascade priority.
+   ================================================================ */
+
+@layer components {
+  .heading-serif {
+    font-family: var(--font-heading);
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  .app-field {
+    border-color: var(--border);
+    background-color: var(--surface-field);
+    color: var(--ink);
+    border-radius: 0;
+  }
+
+  .app-field:focus-visible {
+    border-color: var(--border);
+    box-shadow: 4px 4px 0 rgba(var(--shadow-brand), 0.28);
+  }
+
+  .app-btn {
+    border: 2px solid var(--border);
+    color: var(--ink);
+    background-color: var(--surface-light);
+    border-radius: 0;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .app-btn:hover {
+    background-color: var(--brand-soft);
+  }
+
+  .app-btn-primary {
+    border: 2px solid var(--border);
+    color: var(--brand-on);
+    background-color: var(--brand);
+    border-radius: 0;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .app-btn-primary:hover {
+    background-color: var(--brand-hover);
+  }
+
+  .app-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+
+/* ================================================================
+   AUTH PAGES
+   ================================================================ */
+
+.auth-page {
+  background: var(--bg-gradient) !important;
+  color: var(--ink) !important;
+  font-family: var(--font-sans);
+}
+
+.auth-promo {
+  background: var(--bg-promo) !important;
+  color: var(--paper-warm) !important;
+}
+
+
+/* ================================================================
+   AGENT PAGE — Layout & Panels
+   ================================================================ */
+
+.agent-page {
   background:
-    linear-gradient(180deg, #e8dfcb 0%, #f5f1e6 26%, #f5f1e6 100%),
+    var(--bg-gradient),
     repeating-linear-gradient(
       90deg,
       transparent 0,
       transparent 36px,
-      rgba(20, 34, 51, 0.03) 36px,
-      rgba(20, 34, 51, 0.03) 37px
+      rgba(var(--shadow-ink), 0.03) 36px,
+      rgba(var(--shadow-ink), 0.03) 37px
     );
   color: var(--ink);
 }
@@ -51,18 +174,18 @@ body {
 
 .agent-panel,
 .agent-trace-panel {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   background: var(--paper);
-  box-shadow: 8px 8px 0 rgba(20, 34, 51, 0.16);
+  box-shadow: 8px 8px 0 rgba(var(--shadow-ink), 0.16);
 }
 
 .agent-header {
   background: var(--paper-2);
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
 }
 
 .agent-masthead {
-  border-bottom: 2px solid var(--border-color);
+  border-bottom: 2px solid var(--border);
   padding-bottom: 0.7rem;
 }
 
@@ -73,32 +196,36 @@ body {
 
 .agent-title {
   color: var(--ink);
-  font-family:
-    "Iowan Old Style", "Book Antiqua", Palatino, "Palatino Linotype", serif;
+  font-family: var(--font-heading);
   letter-spacing: 0.01em;
   text-transform: uppercase;
   font-weight: 700;
 }
 
 .agent-subtitle {
-  color: var(--muted-text);
+  color: var(--ink-muted);
 }
 
+
+/* ================================================================
+   AGENT — Form Controls
+   ================================================================ */
+
 .agent-field {
-  border-color: var(--border-color) !important;
-  background: #fffcf4 !important;
+  border-color: var(--border) !important;
+  background: var(--surface-field) !important;
   color: var(--ink) !important;
 }
 
 .agent-field:focus-visible {
-  border-color: var(--border-color) !important;
-  box-shadow: 4px 4px 0 rgba(31, 63, 105, 0.28) !important;
+  border-color: var(--border) !important;
+  box-shadow: 4px 4px 0 rgba(var(--shadow-brand), 0.28) !important;
 }
 
 .agent-btn {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   color: var(--ink) !important;
-  background: #fffdf8 !important;
+  background: var(--surface-light) !important;
 }
 
 .agent-btn:hover {
@@ -106,8 +233,8 @@ body {
 }
 
 .agent-menu {
-  border-color: var(--border-color) !important;
-  background: #fffdf8 !important;
+  border-color: var(--border) !important;
+  background: var(--surface-light) !important;
 }
 
 .agent-menu-item {
@@ -116,23 +243,28 @@ body {
 
 .agent-menu-item:hover,
 .agent-menu-item[data-highlighted] {
-  background: #d9e2ef !important;
-  color: #111827 !important;
+  background: var(--brand-soft) !important;
+  color: var(--ink) !important;
 }
 
 .agent-menu-item:active {
-  background: #bfd0e6 !important;
+  background: var(--brand-active) !important;
 }
 
 .agent-btn-primary {
-  border-color: var(--border-color) !important;
-  color: #f6f9ff !important;
+  border-color: var(--border) !important;
+  color: var(--brand-on) !important;
   background: var(--brand) !important;
 }
 
 .agent-btn-primary:hover {
-  background: #173457 !important;
+  background: var(--brand-hover) !important;
 }
+
+
+/* ================================================================
+   AGENT — Context Popover & Triggers
+   ================================================================ */
 
 .agent-context-trigger {
   color: var(--ink-soft);
@@ -150,7 +282,7 @@ body {
 }
 
 .agent-context-trigger:focus-visible {
-  outline: 2px solid var(--border-color);
+  outline: 2px solid var(--border);
   outline-offset: 2px;
 }
 
@@ -161,22 +293,22 @@ body {
 }
 
 .agent-context-popover {
-  border-color: var(--border-color) !important;
-  background-color: #fffdf7 !important;
+  border-color: var(--border) !important;
+  background-color: var(--card-assistant) !important;
   background-image: none !important;
   color: var(--ink) !important;
-  box-shadow: 6px 6px 0 rgba(20, 34, 51, 0.14) !important;
+  box-shadow: 6px 6px 0 rgba(var(--shadow-ink), 0.14) !important;
   opacity: 1 !important;
   overflow: hidden;
 }
 
 .agent-context-popover-header {
-  background: #ece4d2;
-  border-color: var(--border-color) !important;
+  background: var(--paper-2);
+  border-color: var(--border) !important;
 }
 
 .agent-context-popover-body {
-  background: #fffdf7;
+  background: var(--card-assistant);
   overscroll-behavior: contain;
 }
 
@@ -190,71 +322,76 @@ body {
   place-items: center;
   width: 1rem;
   height: 1rem;
-  border: 1px solid var(--border-color);
-  background: #ece4d2;
+  border: 1px solid var(--border);
+  background: var(--paper-2);
   color: var(--ink);
   font-size: 10px;
   line-height: 1;
 }
 
 .agent-context-help:focus-visible {
-  outline: 2px solid var(--border-color);
+  outline: 2px solid var(--border);
   outline-offset: 2px;
 }
 
 .agent-context-tooltip {
-  border-color: var(--border-color) !important;
-  background: #ece4d2 !important;
+  border-color: var(--border) !important;
+  background: var(--paper-2) !important;
   color: var(--ink) !important;
   max-width: 18rem;
 }
 
+
+/* ================================================================
+   AGENT — Cards & Timeline
+   ================================================================ */
+
 .agent-empty {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   background:
     linear-gradient(180deg, rgba(236, 228, 210, 0.6), rgba(245, 241, 230, 0.7)),
     repeating-linear-gradient(
       0deg,
       transparent 0,
       transparent 28px,
-      rgba(20, 34, 51, 0.05) 28px,
-      rgba(20, 34, 51, 0.05) 29px
+      rgba(var(--shadow-ink), 0.05) 28px,
+      rgba(var(--shadow-ink), 0.05) 29px
     );
 }
 
 .agent-avatar {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   background: var(--paper-3);
   color: var(--ink);
 }
 
 .agent-avatar-tool {
-  background: #dcd0b6;
+  background: var(--avatar-tool);
 }
 
 .agent-card {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   border-radius: 0;
-  box-shadow: 4px 4px 0 rgba(20, 34, 51, 0.12);
+  box-shadow: 4px 4px 0 rgba(var(--shadow-ink), 0.12);
   min-width: 0;
   max-width: 100%;
 }
 
 .agent-card-user {
-  background: #dbe4ef;
+  background: var(--card-user);
 }
 
 .agent-card-assistant {
-  background: #fffdf7;
+  background: var(--card-assistant);
 }
 
 .agent-card-tool {
-  background: #ece4d2;
+  background: var(--card-tool);
 }
 
 .agent-tool-pre {
-  border-color: var(--border-color) !important;
-  background: #fffefb;
+  border-color: var(--border) !important;
+  background: var(--card-assistant);
   max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -262,8 +399,8 @@ body {
 }
 
 .agent-interactive {
-  border-color: var(--border-color) !important;
-  background: #f0e8d9;
+  border-color: var(--border) !important;
+  background: var(--surface-interactive);
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -272,8 +409,8 @@ body {
 
 .agent-question-step,
 .agent-question-option {
-  border: 2px solid var(--border-color);
-  background: #fffdf8;
+  border: 2px solid var(--border);
+  background: var(--surface-light);
   color: var(--ink);
 }
 
@@ -286,7 +423,7 @@ body {
 }
 
 .agent-question-step[data-answered="true"] {
-  box-shadow: inset 0 0 0 1px rgba(20, 34, 51, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--shadow-ink), 0.18);
 }
 
 .agent-question-option {
@@ -294,29 +431,34 @@ body {
 }
 
 .agent-question-option:hover {
-  background: #f7f0de;
+  background: var(--surface-hover);
 }
 
 .agent-question-option[data-selected="true"] {
-  background: #dbe4ef;
-  box-shadow: inset 0 0 0 1px rgba(20, 34, 51, 0.18);
+  background: var(--card-user);
+  box-shadow: inset 0 0 0 1px rgba(var(--shadow-ink), 0.18);
 }
 
 .agent-question-option:focus-visible {
-  outline: 2px solid #173457;
+  outline: 2px solid var(--brand-hover);
   outline-offset: 2px;
 }
 
 .agent-question-marker {
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--border);
   background: var(--paper-2);
 }
 
 .agent-composer {
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
   background: var(--paper-2);
   min-width: 0;
 }
+
+
+/* ================================================================
+   AGENT — Scroll Areas
+   ================================================================ */
 
 .agent-panel [data-slot="scroll-area"],
 .agent-panel [data-slot="scroll-area-viewport"],
@@ -327,7 +469,7 @@ body {
 
 .agent-trace-panel [data-slot="card-header"] {
   background: var(--paper-2);
-  border-color: var(--border-color) !important;
+  border-color: var(--border) !important;
 }
 
 .agent-panel [data-slot="scroll-area-scrollbar"][data-orientation="vertical"],
@@ -336,7 +478,7 @@ body {
   width: 0.5rem !important;
   padding: 1px !important;
   border-left: 0 !important;
-  background: rgba(20, 34, 51, 0.07);
+  background: rgba(var(--shadow-ink), 0.07);
   opacity: 1 !important;
 }
 
@@ -346,15 +488,15 @@ body {
   height: 0.5rem !important;
   padding: 1px !important;
   border-top: 0 !important;
-  background: rgba(20, 34, 51, 0.07);
+  background: rgba(var(--shadow-ink), 0.07);
   opacity: 1 !important;
 }
 
 .agent-panel [data-slot="scroll-area-thumb"],
 .agent-trace-panel [data-slot="scroll-area-thumb"],
 .agent-context-popover [data-slot="scroll-area-thumb"] {
-  background: #8ea0b2 !important;
-  border: 1px solid var(--border-color);
+  background: var(--scrollbar) !important;
+  border: 1px solid var(--border);
   border-radius: 999px;
 }
 
@@ -365,8 +507,13 @@ body {
 .agent-context-popover
   [data-slot="scroll-area-scrollbar"]:hover
   [data-slot="scroll-area-thumb"] {
-  background: #6f89a7 !important;
+  background: var(--scrollbar-hover) !important;
 }
+
+
+/* ================================================================
+   AGENT — Markdown
+   ================================================================ */
 
 .agent-markdown {
   color: var(--ink);
@@ -376,9 +523,7 @@ body {
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-family:
-    "Source Serif 4", "Iowan Old Style", "Book Antiqua", Palatino,
-    "Palatino Linotype", serif;
+  font-family: var(--font-body-serif);
 }
 
 .agent-markdown [data-streamdown="heading-1"],
@@ -394,7 +539,7 @@ body {
 
 .agent-markdown [data-streamdown="heading-1"] {
   font-size: 1.4rem;
-  border-bottom: 2px solid var(--border-color);
+  border-bottom: 2px solid var(--border);
   padding-bottom: 0.35rem;
 }
 
@@ -421,25 +566,25 @@ body {
 
 .agent-markdown [data-streamdown="blockquote"] {
   margin: 0.8rem 0;
-  border-left: 4px solid var(--border-color);
+  border-left: 4px solid var(--border);
   padding-left: 0.8rem;
-  color: var(--muted-text);
+  color: var(--ink-muted);
 }
 
 .agent-markdown [data-streamdown="inline-code"] {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: 0;
-  background: var(--muted-surface);
+  background: var(--surface);
   padding: 0.08rem 0.35rem;
   font-size: 0.85em;
-  font-family: var(--font-geist-mono), "Consolas", "Courier New", monospace;
+  font-family: var(--font-mono);
 }
 
 .agent-markdown [data-streamdown="code-block"] {
   margin: 0.8rem 0;
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--border);
   border-radius: 0;
-  background: #fffdf8;
+  background: var(--surface-light);
   overflow: auto;
   max-width: 100%;
 }
@@ -451,7 +596,7 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-family: var(--font-geist-mono), "Consolas", "Courier New", monospace;
+  font-family: var(--font-mono);
 }
 
 .agent-markdown [data-streamdown="table"] {
@@ -462,21 +607,26 @@ body {
 
 .agent-markdown [data-streamdown="table"] th,
 .agent-markdown [data-streamdown="table"] td {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   padding: 0.45rem 0.55rem;
   text-align: left;
 }
 
 .agent-markdown [data-streamdown="table"] th {
-  background: var(--muted-surface);
+  background: var(--surface);
 }
 
 .agent-markdown [data-streamdown="link"] {
-  color: var(--link-color);
+  color: var(--brand-link);
   text-decoration: underline;
   text-underline-offset: 2px;
   font-weight: 600;
 }
+
+
+/* ================================================================
+   RESPONSIVE
+   ================================================================ */
 
 @media (max-width: 768px) {
   .agent-panel,

@@ -1,99 +1,60 @@
 import type { NextAuthOptions } from "next-auth";
-import type { JWT } from "next-auth/jwt";
-import AzureADProvider from "next-auth/providers/azure-ad";
-
-/**
- * Calls Microsoft's token endpoint to exchange a refresh token
- * for a new access token. Returns the updated token fields.
- */
-async function refreshAccessToken(token: JWT): Promise<JWT> {
-  const res = await fetch(
-    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: process.env.MICROSOFT_CLIENT_ID!,
-        client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
-        grant_type: "refresh_token",
-        refresh_token: token.refreshToken as string,
-      }),
-    }
-  );
-
-  const tokens = await res.json();
-
-  if (!res.ok) {
-    // Refresh failed — mark the token so downstream code can handle it
-    return { ...token, error: "RefreshAccessTokenError" };
-  }
-
-  return {
-    ...token,
-    accessToken: tokens.access_token,
-    // Microsoft may rotate the refresh token — use the new one if provided
-    refreshToken: tokens.refresh_token ?? token.refreshToken,
-    // expires_in is in seconds; convert to an absolute unix timestamp
-    expiresAt: Math.floor(Date.now() / 1000) + tokens.expires_in,
-  };
-}
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import { connectDB } from "@/lib/mongodb";
+import { User } from "@/lib/models/user";
 
 export const authOptions: NextAuthOptions = {
+  session: { strategy: "jwt" },
+
   providers: [
-    AzureADProvider({
-      id: "microsoft",
-      name: "Microsoft",
-      clientId: process.env.MICROSOFT_CLIENT_ID!,
-      clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope:
-            "openid profile email offline_access User.Read Mail.Read Files.Read Sites.Read.All",
-        },
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) return null;
+
+        await connectDB();
+
+        const user = await User.findOne({ email: credentials.email.toLowerCase() });
+        if (!user) return null;
+
+        const isValid = await bcrypt.compare(credentials.password, user.password);
+        if (!isValid) return null;
+
+        return {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name ?? null,
+        };
       },
     }),
   ],
+
   pages: {
-    signIn: "/auth",
+    signIn: "/auth/sign-in",
   },
+
   callbacks: {
-    /**
-     * jwt callback — runs every time the JWT is created or read.
-     *
-     * `account` is only present on the initial sign-in (the raw OAuth
-     * response from Microsoft). On subsequent requests it's undefined,
-     * so we use the `if (account)` check to save the tokens once and
-     * then let them ride in the cookie from that point on.
-     */
-    async jwt({ token, account }) {
-      // First sign-in: persist the Microsoft tokens into the JWT
-      if (account) {
-        console.log("[Auth] Access Token:", account.access_token);
-        console.log("[Auth] Refresh Token:", account.refresh_token);
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.expiresAt = account.expires_at;
-        return token;
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.email = user.email;
+        token.name = user.name;
       }
-
-      // Access token hasn't expired yet — return as-is
-      if (Date.now() < (token.expiresAt as number) * 1000) {
-        return token;
-      }
-
-      // Access token has expired — use the refresh token to get a new one
-      return await refreshAccessToken(token);
+      return token;
     },
 
-    // async signIn({ user }) {
-    //   if (!user.email?.endsWith("@nexabeyond.com")) {
-    //     return false;
-    //   }
-    //   return true;
-    // },
-
-    async redirect({ baseUrl }) {
-      return `${baseUrl}/dashboard`;
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as { id: string }).id = token.id as string;
+        session.user.email = token.email as string;
+        session.user.name = token.name as string | null;
+      }
+      return session;
     },
   },
 };
