@@ -143,11 +143,6 @@ export default function RegisterPage() {
             <br />
             Ready to Work.
           </h2>
-          <p className="mt-4 max-w-md text-sm leading-relaxed opacity-70">
-            A powerful assistant built to handle complex tasks, automate
-            workflows, and give you the tools to move faster. Sign up and start
-            your first session.
-          </p>
         </div>
         <div />
       </div>

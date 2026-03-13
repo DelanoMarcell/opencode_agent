@@ -108,6 +108,15 @@ export default function SignInPage() {
               {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>
+
+          <div className="mt-4 text-center">
+            <Link
+              href="/auth/forgot-password"
+              className="text-sm text-(--ink-muted) underline underline-offset-4 hover:text-foreground"
+            >
+              Forgot your password?
+            </Link>
+          </div>
         </div>
 
         <p className="text-center text-sm text-(--ink-muted)">
@@ -130,11 +139,6 @@ export default function SignInPage() {
             <br />
             Ready to Work.
           </h2>
-          <p className="mt-4 max-w-md text-sm leading-relaxed opacity-70">
-            A powerful assistant built to handle complex tasks, automate
-            workflows, and give you the tools to move faster. Sign in to pick up
-            where you left off.
-          </p>
         </div>
         <div />
       </div>
