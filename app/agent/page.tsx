@@ -2113,8 +2113,8 @@ export default function AgentPage() {
       <div
         className={`agent-layout grid h-full gap-3 ${
           showTrace
-            ? "lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_340px]"
-            : "lg:grid-cols-[280px_minmax(0,1fr)]"
+            ? "lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_340px]"
+            : "lg:grid-cols-[auto_minmax(0,1fr)]"
         }`}
       >
         <MatterChatSidebar
