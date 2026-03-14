@@ -2351,6 +2351,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     0
   );
   const showThinkingCard = isBusy && runUiPhase === "thinking";
+  const shouldShowRouteChatLoader =
+    isLoadingSelectedSession && Boolean(bootstrap.initialRawSessionId);
   const sidebarSessions: Array<MatterChatSidebarSession> = availableSessions.flatMap((session) => {
     const trackedSession = trackedSessionsBySessionId[session.id];
     if (!trackedSession) return [];
@@ -2418,7 +2420,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             <div ref={timelineScrollAreaRef} className="min-h-0 flex-1 min-w-0">
               <ScrollArea type="always" className="h-full min-w-0">
                 <AgentTimeline
-                  isLoadingSelectedSession={isLoadingSelectedSession && !!selectedSessionID}
+                  isLoadingSelectedSession={shouldShowRouteChatLoader}
                   messagesEndRef={messagesEndRef}
                   showThinkingCard={showThinkingCard}
                   timeline={timeline}
