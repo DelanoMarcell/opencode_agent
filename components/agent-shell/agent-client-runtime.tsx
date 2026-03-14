@@ -12,9 +12,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   createOpencodeClient,
   type Part,
-} from "@opencode-ai/sdk/client";
-import {
-  createOpencodeClient as createOpencodeClientV2,
   type PermissionRequest,
   type QuestionInfo,
   type QuestionRequest,
@@ -237,6 +234,16 @@ function getLatestAssistantModelLabel(storedMessages: Array<StoredMessage>): str
   return `${providerID}/${modelID}`;
 }
 
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "AbortError";
+  }
+  if (error && typeof error === "object" && "name" in error) {
+    return String((error as { name?: unknown }).name) === "AbortError";
+  }
+  return false;
+}
+
 export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -296,8 +303,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const configuredBaseURLRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionIDRef = useRef<string | null>(null);
-  const v1ClientRef = useRef<ReturnType<typeof createOpencodeClient> | null>(null);
-  const v2ClientRef = useRef<ReturnType<typeof createOpencodeClientV2> | null>(null);
+  const sdkClientRef = useRef<ReturnType<typeof createOpencodeClient> | null>(null);
   const eventStreamSupervisorAbortRef = useRef<AbortController | null>(null);
   const eventStreamAbortRef = useRef<AbortController | null>(null);
   const eventStreamTaskRef = useRef<Promise<void> | null>(null);
@@ -324,8 +330,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const trackedSessionWriteInFlightRef = useRef<
     Map<string, Promise<AgentBootstrapTrackedSession>>
   >(new Map());
-  const didAutoResumeRef = useRef(false);
   const resumeRequestIDRef = useRef(0);
+  const sessionOptionsRequestIDRef = useRef(0);
+  const sessionOptionsAbortRef = useRef<AbortController | null>(null);
+  const resumeAbortRef = useRef<AbortController | null>(null);
+  const lastRouteSyncKeyRef = useRef("");
 
   useEffect(() => {
     sessionIDRef.current = sessionID;
@@ -367,6 +376,21 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     () =>
       Object.fromEntries(trackedSessions.map((trackedSession) => [trackedSession.id, trackedSession])),
     [trackedSessions]
+  );
+  const routeSyncKey = useMemo(
+    () =>
+      [
+        pathname,
+        bootstrap.initialMatterId ?? "",
+        bootstrap.initialTrackedSessionId ?? "",
+        bootstrap.initialRawSessionId ?? "",
+      ].join("|"),
+    [
+      bootstrap.initialMatterId,
+      bootstrap.initialRawSessionId,
+      bootstrap.initialTrackedSessionId,
+      pathname,
+    ]
   );
 
   const flushTimelineFromMessageState = useCallback(() => {
@@ -684,16 +708,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       );
     }
 
-    if (
-      configuredBaseURLRef.current === baseUrl &&
-      v1ClientRef.current &&
-      v2ClientRef.current
-    ) {
+    if (configuredBaseURLRef.current === baseUrl && sdkClientRef.current) {
       return;
     }
 
-    v1ClientRef.current = createOpencodeClient({ baseUrl });
-    v2ClientRef.current = createOpencodeClientV2({ baseUrl });
+    sdkClientRef.current = createOpencodeClient({ baseUrl });
     configuredBaseURLRef.current = baseUrl;
     resetModelCatalog();
   }, [baseUrl, resetModelCatalog]);
@@ -701,7 +720,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const refreshModelContextLimits = useCallback(async () => {
     try {
       ensureClients();
-      const client = v1ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) return;
 
       const result = await client.provider.list();
@@ -740,7 +759,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return;
     }
 
-    const client = v2ClientRef.current;
+    const client = sdkClientRef.current;
     const currentSessionID = sessionIDRef.current;
     if (!client || !currentSessionID) {
       setPendingQuestions([]);
@@ -791,12 +810,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const getLatestAssistantText = useCallback(async (targetSessionID: string) => {
-    const client = v1ClientRef.current;
+    const client = sdkClientRef.current;
     if (!client) return "";
 
     const { data: sessionMessages } = await client.session.messages({
-      path: { id: targetSessionID },
-      query: { limit: 50 },
+      sessionID: targetSessionID,
+      limit: 50,
     });
 
     if (!sessionMessages?.length) return "";
@@ -977,13 +996,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const resyncActiveSession = useCallback(
     async (reason: string) => {
       const currentSessionID = sessionIDRef.current;
-      const v1Client = v1ClientRef.current;
-      if (!v1Client || !currentSessionID) return;
+      const client = sdkClientRef.current;
+      if (!client || !currentSessionID) return;
 
       try {
-        const messagesResult = await v1Client.session.messages({
-          path: { id: currentSessionID },
-          query: { limit: 1000 },
+        const messagesResult = await client.session.messages({
+          sessionID: currentSessionID,
+          limit: 1000,
         });
         if (messagesResult.error) {
           throw new Error(
@@ -1047,12 +1066,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       runCompletionInFlightRef.current = targetRunID;
       try {
         if (requiresCanonicalRefresh) {
-          const client = v1ClientRef.current;
+          const client = sdkClientRef.current;
           if (!client) throw new Error("OpenCode client is not initialized");
 
           const messagesResult = await client.session.messages({
-            path: { id: targetSessionID },
-            query: { limit: 1000 },
+            sessionID: targetSessionID,
+            limit: 1000,
           });
           if (messagesResult.error) {
             throw new Error(
@@ -1178,7 +1197,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     if (statusPollInFlightRef.current) return;
 
     const activeRun = activeRunRef.current;
-    const client = v1ClientRef.current;
+    const client = sdkClientRef.current;
     if (!activeRun || !client) return;
     const targetRunID = activeRun.id;
     const targetSessionID = activeRun.sessionID;
@@ -1627,7 +1646,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       let hasConnectedOnce = false;
 
       while (!supervisor.signal.aborted) {
-        const client = v1ClientRef.current;
+        const client = sdkClientRef.current;
         if (!client) {
           await waitFor(RECONNECT_DELAYS_MS[0], supervisor.signal);
           continue;
@@ -1639,7 +1658,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         let heartbeatTimer: number | null = null;
 
         try {
-          const subscription = await client.event.subscribe({
+          const subscription = await client.event.subscribe(undefined, {
             signal: controller.signal,
           });
           const stream = subscription.stream as AsyncIterable<StreamEvent>;
@@ -1726,17 +1745,25 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, [appendTrace, processEvent, resyncActiveSession]);
 
   const loadSessionOptions = useCallback(async () => {
+    const requestID = ++sessionOptionsRequestIDRef.current;
+    const isCurrentRequest = () => sessionOptionsRequestIDRef.current === requestID;
+    sessionOptionsAbortRef.current?.abort();
+    const controller = new AbortController();
+    sessionOptionsAbortRef.current = controller;
     setIsLoadingSessionOptions(true);
     try {
       ensureClients();
       void refreshModelContextLimits();
-      const client = v1ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) return;
 
-      const sessionsResult = await client.session.list();
+      const sessionsResult = await client.session.list(undefined, {
+        signal: controller.signal,
+      });
       if (sessionsResult.error) {
         throw new Error(getAssistantError(sessionsResult.error) ?? "Failed to list sessions");
       }
+      if (!isCurrentRequest()) return;
 
       const sorted = [...(sessionsResult.data ?? [])]
         .sort((left, right) => right.time.updated - left.time.updated)
@@ -1756,9 +1783,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         return "";
       });
     } catch (error) {
+      if (isAbortError(error)) return;
+      if (!isCurrentRequest()) return;
       setErrorText(toErrorMessage(error));
     } finally {
-      setIsLoadingSessionOptions(false);
+      if (sessionOptionsAbortRef.current === controller) {
+        sessionOptionsAbortRef.current = null;
+      }
+      if (isCurrentRequest()) {
+        setIsLoadingSessionOptions(false);
+      }
     }
   }, [bootstrap.initialRawSessionId, ensureClients, refreshModelContextLimits, trackedSessionsBySessionId]);
 
@@ -1882,17 +1916,22 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     ]
   );
 
-  const resumeSession = useCallback(async (targetSessionID?: string) => {
-    const liveSelectedSessionID = targetSessionID ?? selectedSessionID;
-    if (!liveSelectedSessionID) return;
+  const resumeSession = useCallback(async (targetSessionID: string) => {
+    const liveSelectedSessionID = targetSessionID;
     const resumeRequestID = ++resumeRequestIDRef.current;
     const isCurrentResumeRequest = () => resumeRequestIDRef.current === resumeRequestID;
+    resumeAbortRef.current?.abort();
+    const controller = new AbortController();
+    resumeAbortRef.current = controller;
 
     setErrorText(null);
     setIsBusy(false);
     setIsLoadingSelectedSession(true);
+    setSessionID(null);
+    setSelectedSessionID(liveSelectedSessionID);
     setRunUiPhase("thinking");
 
+    sessionIDRef.current = null;
     messageEntriesRef.current = [];
     messagePartsByMessageIDRef.current = new Map();
     pendingOptimisticUserRef.current = null;
@@ -1909,12 +1948,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       await ensureEventStream();
       await refreshModelContextLimits();
 
-      const client = v1ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) throw new Error("OpenCode client is not initialized");
 
       const messagesResult = await client.session.messages({
-        path: { id: liveSelectedSessionID },
-        query: { limit: 1000 },
+        sessionID: liveSelectedSessionID,
+        limit: 1000,
+      }, {
+        signal: controller.signal,
       });
       if (messagesResult.error) {
         throw new Error(
@@ -1939,7 +1980,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setSessionID(liveSelectedSessionID);
       setSelectedSessionID(liveSelectedSessionID);
 
-      const statusResult = await client.session.status();
+      const statusResult = await client.session.status(undefined, {
+        signal: controller.signal,
+      });
       if (statusResult.error) {
         throw new Error(getAssistantError(statusResult.error) ?? "Failed to load session status");
       }
@@ -1998,6 +2041,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       appendTrace(`session resumed: ${liveSelectedSessionID} [status: ${sessionStatus.type}]`);
       scheduleInteractiveRefresh(0);
     } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
       if (!isCurrentResumeRequest()) {
         return;
       }
@@ -2005,6 +2051,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setErrorText(message);
       appendTrace(`resume error: ${message}`);
     } finally {
+      if (resumeAbortRef.current === controller) {
+        resumeAbortRef.current = null;
+      }
       if (isCurrentResumeRequest()) {
         setIsLoadingSelectedSession(false);
       }
@@ -2020,7 +2069,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     refreshModelContextLimits,
     resetSessionTokenTracking,
     scheduleInteractiveRefresh,
-    selectedSessionID,
   ]);
 
   const handleSelectMatter = useCallback(
@@ -2050,18 +2098,66 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setErrorText("Matter creation UI is not implemented yet.");
   }, []);
 
+  const handleResumeCurrentSession = useCallback(() => {
+    const targetSessionID = selectedSessionID || sessionIDRef.current;
+    if (!targetSessionID) return;
+    void resumeSession(targetSessionID);
+  }, [resumeSession, selectedSessionID]);
+
   useEffect(() => {
+    if (lastRouteSyncKeyRef.current === routeSyncKey) {
+      return;
+    }
+    lastRouteSyncKeyRef.current = routeSyncKey;
+
+    resumeRequestIDRef.current += 1;
+    setSelectedMatterID(bootstrap.initialMatterId ?? "");
+    setSelectedTrackedSessionID(bootstrap.initialTrackedSessionId ?? "");
+    setSelectedSessionID(bootstrap.initialRawSessionId ?? "");
+    setIsLoadingSelectedSession(Boolean(bootstrap.initialRawSessionId));
+
     void loadSessionOptions();
     void refreshModelContextLimits();
-  }, [loadSessionOptions, refreshModelContextLimits]);
 
-  useEffect(() => {
-    if (!bootstrap.initialRawSessionId || didAutoResumeRef.current) return;
-    if (selectedSessionID !== bootstrap.initialRawSessionId) return;
+    if (bootstrap.initialRawSessionId) {
+      void resumeSession(bootstrap.initialRawSessionId);
+      return;
+    }
 
-    didAutoResumeRef.current = true;
-    void resumeSession();
-  }, [bootstrap.initialRawSessionId, resumeSession, selectedSessionID]);
+    if (!bootstrap.initialRawSessionId) {
+      resumeAbortRef.current?.abort();
+      resumeAbortRef.current = null;
+      sessionIDRef.current = null;
+      activeRunRef.current = null;
+      runCompletionInFlightRef.current = null;
+      statusPollInFlightRef.current = false;
+      pendingOptimisticUserRef.current = null;
+      activeAssistantServerMessageIDRef.current = null;
+      messageEntriesRef.current = [];
+      messagePartsByMessageIDRef.current = new Map();
+      messageRoleByIDRef.current.clear();
+      partTextSeenRef.current.clear();
+      toolStateSeenRef.current.clear();
+      shouldAutoScrollRef.current = true;
+      resetSessionTokenTracking();
+      setSessionID(null);
+      setTimeline([]);
+      setIsBusy(false);
+      setRunUiPhase("thinking");
+      setPendingQuestions([]);
+      setPendingPermissions([]);
+      setQuestionDrafts({});
+      setActiveQuestionIndexByRequest({});
+      markAssistantCardsComplete();
+    }
+  }, [
+    loadSessionOptions,
+    markAssistantCardsComplete,
+    refreshModelContextLimits,
+    resetSessionTokenTracking,
+    routeSyncKey,
+    resumeSession,
+  ]);
 
   useEffect(() => {
     if (statusPollTimerRef.current !== null) {
@@ -2117,7 +2213,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
     if (sessionIDRef.current) return sessionIDRef.current;
 
-    const client = v1ClientRef.current;
+    const client = sdkClientRef.current;
     if (!client) throw new Error("OpenCode client is not initialized");
 
     const sessionResult = await client.session.create();
@@ -2150,7 +2246,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
   const sendPrompt = useCallback(async () => {
     const prompt = inputText.trim();
-    if (!prompt || isBusy) return;
+    if (!prompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
 
@@ -2180,7 +2276,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
     try {
       const liveSessionID = await ensureSession();
-      const client = v1ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) throw new Error("OpenCode client is not initialized");
 
       const fail = (error: Error) => {
@@ -2218,10 +2314,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       streamLastEventAtRef.current = Date.now();
 
       await client.session.promptAsync({
-        path: { id: liveSessionID },
-        body: {
-          parts: [{ type: "text", text: prompt }],
-        },
+        sessionID: liveSessionID,
+        parts: [{ type: "text", text: prompt }],
       });
 
       scheduleInteractiveRefresh(0);
@@ -2243,13 +2337,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     ensureSession,
     inputText,
     isBusy,
+    isLoadingSelectedSession,
     markAssistantCardsComplete,
     scheduleInteractiveRefresh,
   ]);
 
   const handlePermissionReply = useCallback(
     async (requestID: string, reply: "once" | "always" | "reject") => {
-      const client = v2ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) return;
 
       setErrorText(null);
@@ -2329,7 +2424,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
   const handleQuestionReply = useCallback(
     async (request: QuestionRequest) => {
-      const client = v2ClientRef.current;
+      const client = sdkClientRef.current;
       if (!client) return;
 
       const requestDrafts = questionDrafts[request.id] ?? [];
@@ -2399,13 +2494,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         window.clearInterval(statusPollTimerRef.current);
         statusPollTimerRef.current = null;
       }
+      sessionOptionsAbortRef.current?.abort();
+      sessionOptionsAbortRef.current = null;
+      resumeAbortRef.current?.abort();
+      resumeAbortRef.current = null;
       interactiveRefreshInFlightRef.current = false;
       interactiveRefreshDirtyRef.current = false;
       statusPollInFlightRef.current = false;
       runCompletionInFlightRef.current = null;
 
-      v1ClientRef.current = null;
-      v2ClientRef.current = null;
+      sdkClientRef.current = null;
       configuredBaseURLRef.current = null;
 
       sessionIDRef.current = null;
@@ -2434,7 +2532,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setIsBusy(false);
       setIsLoadingSelectedSession(false);
       setRunUiPhase("thinking");
-      didAutoResumeRef.current = false;
       void loadSessionOptions();
       const targetRoute = selectedMatterID ? `/agent/matters/${selectedMatterID}` : "/agent";
       router.push(targetRoute);
@@ -2579,7 +2676,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               selectedSessionID={selectedSessionID}
               onLoadSessionOptions={() => void loadSessionOptions()}
               onResetSession={resetSession}
-              onResumeSession={() => void resumeSession()}
+              onResumeSession={handleResumeCurrentSession}
               onToggleTrace={() => setShowTrace((value) => !value)}
               showTrace={showTrace}
             />
@@ -2619,12 +2716,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             contextUsageText={contextUsageText}
             inputText={inputText}
             isBusy={isBusy}
+            isLoadingSelectedSession={isLoadingSelectedSession}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
             onInputTextChange={setInputText}
             onKeyDown={handleComposerKeyDown}
             onSend={() => void sendPrompt()}
-            sendDisabled={!inputText.trim() || isBusy}
+            sendDisabled={!inputText.trim() || isBusy || isLoadingSelectedSession}
             sessionCostFormulaGroups={sessionCostFormulaGroups}
             sessionCostFormulaTotal={sessionCostFormulaTotal}
             sessionSpendText={sessionSpendText}

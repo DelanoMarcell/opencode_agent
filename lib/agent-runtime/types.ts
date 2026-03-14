@@ -1,13 +1,10 @@
-import type { Part } from "@opencode-ai/sdk/client";
 import type {
-  Event as EventV2,
-  Part as PartV2,
+  Event,
+  Part,
 } from "@opencode-ai/sdk/v2/client";
-import type { Event } from "@opencode-ai/sdk/client";
-
-export type AgentEvent = Event | EventV2;
+export type AgentEvent = Event;
 export type StreamEvent = AgentEvent | { payload: AgentEvent };
-export type AgentPart = Part | PartV2;
+export type AgentPart = Part;
 export type TextPart = Extract<AgentPart, { type: "text" }>;
 export type ToolPart = Extract<AgentPart, { type: "tool" }>;
 

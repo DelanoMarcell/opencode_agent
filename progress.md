@@ -30,6 +30,12 @@
 - [done] Add a client-side loader under `Recent chats` while tracked OpenCode sessions hydrate
 - [done] Add a client-side loader in the RHS chat panel while selected session history loads from OpenCode
 - [done] Consolidate shared loaders under `components/loaders`
+- [done] Consolidate the agent runtime onto `@opencode-ai/sdk/v2/client` only and remove old SDK surface dependencies from shared runtime types/helpers
+- [done] Guard route navigation against stale chat/session-list loader races in the agent runtime
+- [done] Stabilize route-sync resume flow to prevent repeated auto-resume loops and loader flicker after route changes
+- [done] Add abortable session list/resume requests to prevent loaders from hanging across rapid route changes
+- [done] Clear stale interactive requests and usage metrics when route sync removes the active session
+- [done] Clear the active session ref and block prompt entry while route auto-resume is hydrating a different chat
 - [ ] Build the matter creation UI flow from the sidebar `New matter folder` action
 - [ ] Add a matter creation form with:
   - matter code

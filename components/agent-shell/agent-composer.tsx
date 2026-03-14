@@ -31,6 +31,7 @@ type AgentComposerProps = {
   contextUsageText: string;
   inputText: string;
   isBusy: boolean;
+  isLoadingSelectedSession: boolean;
   latestContextUsage: TokenUsageTotals | null;
   modelLabel: string;
   onInputTextChange: (value: string) => void;
@@ -49,6 +50,7 @@ export function AgentComposer({
   contextUsageText,
   inputText,
   isBusy,
+  isLoadingSelectedSession,
   latestContextUsage,
   modelLabel,
   onInputTextChange,
@@ -61,6 +63,8 @@ export function AgentComposer({
   sessionTotalsRows,
   textareaRef,
 }: AgentComposerProps) {
+  const isComposerDisabled = isBusy || isLoadingSelectedSession;
+
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
       <div className="space-y-2">
@@ -71,12 +75,14 @@ export function AgentComposer({
           onKeyDown={onKeyDown}
           placeholder="Write a message..."
           className="agent-field min-h-16 max-h-40 overflow-y-auto resize-none rounded-none border-2 shadow-none"
-          disabled={isBusy}
+          disabled={isComposerDisabled}
         />
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <p className="text-xs text-(--ink-soft)">
-              {isBusy
+              {isLoadingSelectedSession
+                ? "Loading selected chat..."
+                : isBusy
                 ? "Waiting for assistant response..."
                 : "Press Enter to send, Shift+Enter for newline."}
             </p>

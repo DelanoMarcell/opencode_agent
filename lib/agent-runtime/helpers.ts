@@ -1,5 +1,4 @@
-import type { Part } from "@opencode-ai/sdk/client";
-import type { QuestionInfo } from "@opencode-ai/sdk/v2/client";
+import type { Part, QuestionInfo } from "@opencode-ai/sdk/v2/client";
 
 import type {
   AssistantUsageSnapshot,

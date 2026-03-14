@@ -1,7 +1,7 @@
 export function FullScreenLoadingV3() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-(--bg-gradient) px-6 text-(--ink)">
-      <div className="bg-(--paper) px-10 py-10">
+    <div className="flex min-h-dvh items-center justify-center bg-(--bg-gradient) px-6 text-foreground">
+      <div className="bg-background px-10 py-10">
         <div className="loader-v3" aria-label="Loading" role="status" />
       </div>
       <style>{`

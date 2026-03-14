@@ -1,7 +1,7 @@
 export function FullScreenLoading() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-(--bg-gradient) px-6 text-(--ink)">
-      <div className="border-2 border-(--border) bg-(--paper) px-10 py-10 shadow-[8px_8px_0_rgba(var(--shadow-ink),0.16)]">
+    <div className="flex min-h-dvh items-center justify-center bg-(--bg-gradient) px-6 text-foreground">
+      <div className="border-2 border-(--border) bg-background px-10 py-10 shadow-[8px_8px_0_rgba(var(--shadow-ink),0.16)]">
         <div className="loader-v1" aria-label="Loading" role="status">
           <span />
           <span />

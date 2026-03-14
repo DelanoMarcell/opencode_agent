@@ -79,7 +79,7 @@ function RowActionMenu({ kind, title }: RowActionMenuProps) {
           type="button"
           size="icon-xs"
           variant="ghost"
-          className="h-7 w-7 cursor-pointer rounded-none border-0 bg-transparent text-(--ink) shadow-none hover:bg-transparent hover:text-(--ink-soft)"
+          className="h-7 w-7 cursor-pointer rounded-none border-0 bg-transparent text-foreground shadow-none hover:bg-transparent hover:text-(--ink-soft)"
           aria-label={`Open ${kind} actions for ${title}`}
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
@@ -149,14 +149,14 @@ function SidebarBody({
   onToggleMatter,
 }: SidebarBodyProps) {
   return (
-    <div className="flex h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-(--paper) text-(--ink)">
+    <div className="flex h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-background text-foreground">
       <div className="border-b-2 border-(--border) bg-(--paper-2) px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--ink-soft)">
               Workspace
             </p>
-            <p className="mt-1 truncate text-sm font-semibold text-(--ink)">Chats and matters</p>
+            <p className="mt-1 truncate text-sm font-semibold text-foreground">Chats and matters</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <DropdownMenu>
@@ -193,7 +193,7 @@ function SidebarBody({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
+      <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
         <div className="min-w-0 w-full space-y-5 px-3 py-3">
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2 px-1">
@@ -353,7 +353,7 @@ function SidebarBody({
               type="button"
               className="flex w-full min-w-0 cursor-pointer items-center gap-3 overflow-hidden border-2 border-(--border) bg-(--surface-light) px-3 py-2.5 text-left hover:bg-(--brand-soft)"
             >
-              <UserCircle2 className="size-5 shrink-0 text-(--ink)" />
+              <UserCircle2 className="size-5 shrink-0 text-foreground" />
               <div className="min-w-0 flex-1 overflow-hidden">
                 <p className="truncate text-sm font-medium">{userEmail}</p>
                 <p className="truncate text-xs text-(--ink-muted)">
@@ -467,7 +467,7 @@ export function MatterChatSidebar({
         </Button>
       </div>
 
-      <aside className="agent-panel hidden h-full min-h-0 w-[320px] min-w-0 overflow-hidden border-2 bg-(--paper) lg:flex">
+      <aside className="agent-panel hidden h-full min-h-0 w-[320px] min-w-0 overflow-hidden border-2 bg-background lg:flex">
         <SidebarBody
           activeMatterID={selectedMatterID}
           activeTrackedSessionID={selectedTrackedSessionID}
@@ -488,7 +488,7 @@ export function MatterChatSidebar({
         <SheetContent
           side="left"
           showCloseButton={false}
-          className="w-[88vw] max-w-[340px] border-r-2 border-(--border) bg-(--paper) p-0"
+          className="w-[88vw] max-w-[340px] border-r-2 border-(--border) bg-background p-0"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Chats and matter folders</SheetTitle>

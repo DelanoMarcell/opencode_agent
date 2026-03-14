@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -9,6 +9,14 @@ import { Spinner } from "@/components/loaders/spinner";
 import { Label } from "@/components/ui/label";
 
 export default function SignInPage() {
+  return (
+    <Suspense>
+      <SignInPageInner />
+    </Suspense>
+  );
+}
+
+function SignInPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const justRegistered = searchParams.get("registered") === "true";
