@@ -145,6 +145,98 @@ function buildChatRoute(trackedSessionID: string, matterID?: string) {
     : `/agent/chats/${trackedSessionID}`;
 }
 
+function collectToolCallsFromMessageParts(
+  partsByMessageID: Map<string, Array<MessagePartEntry>>
+): Map<string, RuntimeToolCall> {
+  const toolCalls = new Map<string, RuntimeToolCall>();
+
+  for (const parts of partsByMessageID.values()) {
+    for (const part of parts) {
+      if (part.kind !== "tool") continue;
+      toolCalls.set(part.toolCall.toolCallId, part.toolCall);
+    }
+  }
+
+  return toolCalls;
+}
+
+function getResumedRunPartsByMessageID(
+  messages: Array<MessageEntry>,
+  partsByMessageID: Map<string, Array<MessagePartEntry>>
+): Map<string, Array<MessagePartEntry>> {
+  const orderedMessages = [...messages].sort(
+    (left, right) =>
+      left.createdAt - right.createdAt ||
+      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  );
+  const latestUserMessage = [...orderedMessages]
+    .reverse()
+    .find((message) => message.role === "user");
+
+  const relevantAssistantMessages =
+    latestUserMessage !== undefined
+      ? orderedMessages.filter(
+          (message) =>
+            message.role === "assistant" &&
+            (message.parentID === latestUserMessage.id ||
+              message.createdAt > latestUserMessage.createdAt)
+        )
+      : orderedMessages.slice(-1).filter((message) => message.role === "assistant");
+
+  return new Map(
+    relevantAssistantMessages
+      .map((message) => [message.id, partsByMessageID.get(message.id) ?? []] as const)
+      .filter(([, parts]) => parts.length > 0)
+  );
+}
+
+function deriveRunUiPhaseFromMessageParts(
+  partsByMessageID: Map<string, Array<MessagePartEntry>>
+): "thinking" | "tool-active" | "assistant-output" {
+  let hasRunningToolCalls = false;
+  let hasRunningAssistantText = false;
+
+  for (const parts of partsByMessageID.values()) {
+    for (const part of parts) {
+      if (part.kind === "tool") {
+        if (part.toolCall.status === "pending" || part.toolCall.status === "running") {
+          hasRunningToolCalls = true;
+        }
+        continue;
+      }
+
+      if (part.running) {
+        hasRunningAssistantText = true;
+      }
+    }
+  }
+
+  if (hasRunningToolCalls) return "tool-active";
+  if (hasRunningAssistantText) return "assistant-output";
+  return "thinking";
+}
+
+function getLatestAssistantModelLabel(storedMessages: Array<StoredMessage>): string | undefined {
+  let latestAssistant: StoredMessage | null = null;
+
+  for (const message of storedMessages) {
+    if (message.info.role !== "assistant") continue;
+    if (!latestAssistant || message.info.time.created >= latestAssistant.info.time.created) {
+      latestAssistant = message;
+    }
+  }
+
+  if (!latestAssistant) return undefined;
+
+  const providerID =
+    typeof latestAssistant.info.providerID === "string" ? latestAssistant.info.providerID : null;
+  const modelID =
+    typeof latestAssistant.info.modelID === "string" ? latestAssistant.info.modelID : null;
+
+  if (!providerID || !modelID) return undefined;
+  return `${providerID}/${modelID}`;
+}
+
 export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -233,6 +325,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     Map<string, Promise<AgentBootstrapTrackedSession>>
   >(new Map());
   const didAutoResumeRef = useRef(false);
+  const resumeRequestIDRef = useRef(0);
 
   useEffect(() => {
     sessionIDRef.current = sessionID;
@@ -919,6 +1012,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             currentRun.assistantText,
             latestAssistantText
           );
+        } else {
+          markAssistantCardsComplete();
         }
 
         scheduleInteractiveRefresh(0);
@@ -1790,6 +1885,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const resumeSession = useCallback(async (targetSessionID?: string) => {
     const liveSelectedSessionID = targetSessionID ?? selectedSessionID;
     if (!liveSelectedSessionID) return;
+    const resumeRequestID = ++resumeRequestIDRef.current;
+    const isCurrentResumeRequest = () => resumeRequestIDRef.current === resumeRequestID;
 
     setErrorText(null);
     setIsBusy(false);
@@ -1824,9 +1921,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           getAssistantError(messagesResult.error) ?? "Failed to load session history"
         );
       }
+      if (!isCurrentResumeRequest()) {
+        return;
+      }
 
       const storedMessages = (messagesResult.data ?? []) as Array<StoredMessage>;
       const nextState = buildMessageStateFromStoredMessages(storedMessages);
+      const localUserCount = nextState.messages.reduce(
+        (count, message) => (message.role === "user" ? count + 1 : count),
+        0
+      );
       rebuildSessionUsageFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
       shouldAutoScrollRef.current = true;
@@ -1834,14 +1938,76 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       sessionIDRef.current = liveSelectedSessionID;
       setSessionID(liveSelectedSessionID);
       setSelectedSessionID(liveSelectedSessionID);
-      appendTrace(`session resumed: ${liveSelectedSessionID}`);
+
+      const statusResult = await client.session.status();
+      if (statusResult.error) {
+        throw new Error(getAssistantError(statusResult.error) ?? "Failed to load session status");
+      }
+      if (!isCurrentResumeRequest() || sessionIDRef.current !== liveSelectedSessionID) {
+        return;
+      }
+
+      const statusBySession = statusResult.data ?? {};
+      const sessionStatus = statusBySession[liveSelectedSessionID] ?? { type: "idle" };
+
+      if (sessionStatus.type === "busy" || sessionStatus.type === "retry") {
+        const resumedRunPartsByMessageID = getResumedRunPartsByMessageID(
+          messageEntriesRef.current,
+          messagePartsByMessageIDRef.current
+        );
+        const runID = crypto.randomUUID();
+        const fail = (error: Error) => {
+          if (activeRunRef.current?.id === runID) {
+            activeRunRef.current = null;
+          }
+          setIsBusy(false);
+          setErrorText(error.message);
+          markAssistantCardsComplete();
+        };
+
+        const finish = () => {
+          if (activeRunRef.current?.id === runID) {
+            activeRunRef.current = null;
+          }
+          setIsBusy(false);
+        };
+
+        activeRunRef.current = {
+          id: runID,
+          sessionID: liveSelectedSessionID,
+          assistantText: "",
+          startObserved: didSnapshotCaptureActiveRun(storedMessages, localUserCount),
+          // A resumed busy run is reconstructed from a potentially stale snapshot, so force
+          // one canonical refresh when it finishes even if we only see the trailing idle event.
+          pollRecoveryEligible: true,
+          model: getLatestAssistantModelLabel(storedMessages),
+          toolCalls: collectToolCallsFromMessageParts(resumedRunPartsByMessageID),
+          fail,
+          finish,
+        };
+        streamLastEventAtRef.current = Date.now();
+        setIsBusy(true);
+        setRunUiPhase(deriveRunUiPhaseFromMessageParts(resumedRunPartsByMessageID));
+      } else {
+        activeRunRef.current = null;
+        markAssistantCardsComplete();
+        setIsBusy(false);
+        setRunUiPhase("thinking");
+      }
+
+      appendTrace(`session resumed: ${liveSelectedSessionID} [status: ${sessionStatus.type}]`);
       scheduleInteractiveRefresh(0);
     } catch (error) {
+      if (!isCurrentResumeRequest()) {
+        return;
+      }
       const message = toErrorMessage(error);
       setErrorText(message);
       appendTrace(`resume error: ${message}`);
     } finally {
-      setIsLoadingSelectedSession(false);
+      if (isCurrentResumeRequest()) {
+        setIsLoadingSelectedSession(false);
+      }
     }
   }, [
     appendTrace,
@@ -1849,6 +2015,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     rebuildSessionUsageFromStoredMessages,
     ensureClients,
     ensureEventStream,
+    markAssistantCardsComplete,
     replaceMessageState,
     refreshModelContextLimits,
     resetSessionTokenTracking,

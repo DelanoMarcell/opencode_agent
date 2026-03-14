@@ -665,6 +665,12 @@ export function isTextPartRunning(part: TextPart): boolean {
   return typeof (time as Record<string, unknown>).end !== "number";
 }
 
+export function isStoredTextPartRunning(part: TextPart): boolean {
+  const time = "time" in part ? part.time : undefined;
+  if (!time || typeof time !== "object") return true;
+  return typeof (time as Record<string, unknown>).end !== "number";
+}
+
 export function getLatestAssistantSnapshot(storedMessages: Array<StoredMessage>): {
   text: string;
 } {
@@ -806,7 +812,7 @@ export function buildMessageStateFromStoredMessages(storedMessages: Array<Stored
           partID: part.id,
           sortIndex: partIndex,
           text: part.text,
-          running: false,
+          running: isStoredTextPartRunning(part),
         });
         continue;
       }
