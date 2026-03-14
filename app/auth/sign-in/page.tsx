@@ -4,7 +4,9 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { AuthPromoImage } from "@/components/auth/auth-promo-image";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -105,7 +107,7 @@ export default function SignInPage() {
               disabled={loading}
               className="app-btn-primary mt-2 h-10 w-full text-sm"
             >
-              {loading ? "Signing in…" : "Sign in"}
+              {loading ? (<span className="inline-flex items-center justify-center gap-2"><Spinner size="sm" className="text-(--brand-on)" /><span>Signing in…</span></span>) : "Sign in"}
             </button>
           </form>
 
@@ -130,18 +132,7 @@ export default function SignInPage() {
         </p>
       </div>
 
-      {/* Right — Promo Panel */}
-      <div className="auth-promo hidden flex-col justify-between border-l-2 border-(--border) p-12 md:flex md:w-1/2 lg:p-16">
-        <div />
-        <div>
-          <h2 className="heading-serif text-3xl leading-tight normal-case lg:text-4xl">
-            Your AI Agent,
-            <br />
-            Ready to Work.
-          </h2>
-        </div>
-        <div />
-      </div>
+      <AuthPromoImage />
     </div>
   );
 }

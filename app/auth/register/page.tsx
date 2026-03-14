@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { AuthPromoImage } from "@/components/auth/auth-promo-image";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -118,7 +120,7 @@ export default function RegisterPage() {
               disabled={loading}
               className="app-btn-primary mt-2 h-10 w-full text-sm"
             >
-              {loading ? "Creating account…" : "Create account"}
+              {loading ? (<span className="inline-flex items-center justify-center gap-2"><Spinner size="sm" className="text-(--brand-on)" /><span>Creating account…</span></span>) : "Create account"}
             </button>
           </form>
         </div>
@@ -134,18 +136,7 @@ export default function RegisterPage() {
         </p>
       </div>
 
-      {/* Right — Promo Panel */}
-      <div className="auth-promo hidden flex-col justify-between border-l-2 border-(--border) p-12 md:flex md:w-1/2 lg:p-16">
-        <div />
-        <div>
-          <h2 className="heading-serif text-3xl leading-tight normal-case lg:text-4xl">
-            Your AI Agent,
-            <br />
-            Ready to Work.
-          </h2>
-        </div>
-        <div />
-      </div>
+      <AuthPromoImage />
     </div>
   );
 }

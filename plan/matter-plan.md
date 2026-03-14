@@ -23,13 +23,15 @@ The design uses three collections:
 
 1. `matters`
 2. `matter_members`
-3. `matter_sessions`
+3. `opencode_sessions`
+4. `matter_sessions`
 
 This split is intentional. Each collection models a different kind of data and relationship:
 
 - `matters` stores matter-level metadata
 - `matter_members` stores who can access each matter
-- `matter_sessions` stores which OpenCode sessions belong to which matter
+- `opencode_sessions` stores app-side metadata for every known OpenCode session, including who created it
+- `matter_sessions` stores which tracked OpenCode sessions belong to which matter
 
 ## Collection Schemas
 
@@ -136,15 +138,56 @@ Another member:
 }
 ```
 
+### `opencode_sessions`
+
+One document represents one tracked OpenCode session known to the application.
+
+```ts
+{
+  _id: ObjectId,
+  sessionId: string,         // OpenCode session id
+  createdByUserId: ObjectId,
+  createdAt: Date
+}
+```
+
+Notes:
+
+- OpenCode still owns the actual session content and runtime history.
+- MongoDB stores app-side metadata for each session.
+- This collection lets the app track who created a session, including sessions not tied to any matter.
+
+Example:
+
+```json
+{
+  "_id": "67d1a300c8e4b2a91f003333",
+  "sessionId": "ses_abc123xyz789",
+  "createdByUserId": "67d19f80c8e4b2a91f000101",
+  "createdAt": "2026-03-13T09:05:00.000Z"
+}
+```
+
+Another tracked session:
+
+```json
+{
+  "_id": "67d1a301c8e4b2a91f003334",
+  "sessionId": "ses_def456uvw000",
+  "createdByUserId": "67d19fb0c8e4b2a91f000102",
+  "createdAt": "2026-03-13T09:10:00.000Z"
+}
+```
+
 ### `matter_sessions`
 
-One document represents one OpenCode session assigned to one matter.
+One document represents one tracked OpenCode session assigned to one matter.
 
 ```ts
 {
   _id: ObjectId,
   matterId: ObjectId,
-  sessionId: string,         // OpenCode session id
+  opencodeSessionId: ObjectId,
   addedByUserId: ObjectId,
   createdAt: Date
 }
@@ -152,19 +195,19 @@ One document represents one OpenCode session assigned to one matter.
 
 Notes:
 
-- OpenCode owns sessions.
-- MongoDB stores the mapping from session ID to matter.
-- This collection is the app-side source of truth for matter assignment.
+- This collection maps tracked sessions to matters.
+- `opencodeSessionId` points to a row in `opencode_sessions`.
+- This preserves creator tracking separately from matter assignment.
 
 Example:
 
 ```json
 {
-  "_id": "67d1a300c8e4b2a91f003333",
+  "_id": "67d1a350c8e4b2a91f003444",
   "matterId": "67d1a1f0c8e4b2a91f001111",
-  "sessionId": "ses_abc123xyz789",
+  "opencodeSessionId": "67d1a300c8e4b2a91f003333",
   "addedByUserId": "67d19f80c8e4b2a91f000101",
-  "createdAt": "2026-03-13T09:05:00.000Z"
+  "createdAt": "2026-03-13T09:06:00.000Z"
 }
 ```
 
@@ -172,11 +215,11 @@ Another linked session:
 
 ```json
 {
-  "_id": "67d1a301c8e4b2a91f003334",
+  "_id": "67d1a351c8e4b2a91f003445",
   "matterId": "67d1a1f0c8e4b2a91f001111",
-  "sessionId": "ses_def456uvw000",
+  "opencodeSessionId": "67d1a301c8e4b2a91f003334",
   "addedByUserId": "67d19fb0c8e4b2a91f000102",
-  "createdAt": "2026-03-13T09:10:00.000Z"
+  "createdAt": "2026-03-13T09:11:00.000Z"
 }
 ```
 
@@ -199,7 +242,21 @@ Why it should be modeled separately:
 - this supports future sharing cleanly
 - it gives the app an explicit list of users who can access each matter
 
-### 2. `matters` to `matter_sessions`
+### 2. `opencode_sessions` to `matter_sessions`
+
+Relationship:
+
+- one tracked session to zero or one matter assignment record
+
+This is a one-to-zero-or-one relationship from a tracked session to a matter link.
+
+Why it should be modeled separately:
+
+- a session may exist without belonging to a matter
+- the app needs creator tracking even for unassigned sessions
+- creator tracking and matter assignment are different concerns
+
+### 3. `matters` to `matter_sessions`
 
 Relationship:
 
@@ -210,14 +267,14 @@ This is a one-to-many relationship from matter to assigned sessions.
 Why it should be modeled separately:
 
 - one matter can contain many sessions
-- OpenCode sessions are not stored in MongoDB, so the app needs a separate mapping layer
+- session assignment changes independently of session creation
 - this keeps matter metadata separate from operational session assignment data
 
-### 3. `sessionId` to `matter_sessions`
+### 4. Tracked Session Assignment Rule
 
 Planned rule:
 
-- one OpenCode session belongs to zero or one matter
+- one tracked OpenCode session belongs to zero or one matter
 
 This means:
 
@@ -248,6 +305,7 @@ This is a critical design rule because the application does not control how Open
 
 - matter metadata
 - matter access
+- tracked session metadata
 - matter-to-session assignment
 
 ## Example End-to-End Data
@@ -297,17 +355,39 @@ This is a critical design rule because the application does not control how Open
 ]
 ```
 
+### Tracked OpenCode Sessions
+
+```json
+[
+  {
+    "_id": "67d1a300c8e4b2a91f003333",
+    "sessionId": "ses_abc123xyz789",
+    "createdByUserId": "67d19f80c8e4b2a91f000101"
+  },
+  {
+    "_id": "67d1a301c8e4b2a91f003334",
+    "sessionId": "ses_def456uvw000",
+    "createdByUserId": "67d19fb0c8e4b2a91f000102"
+  },
+  {
+    "_id": "67d1a302c8e4b2a91f003335",
+    "sessionId": "ses_unfiled001",
+    "createdByUserId": "67d19f80c8e4b2a91f000101"
+  }
+]
+```
+
 ### Matter Sessions
 
 ```json
 [
   {
     "matterId": "67d1a1f0c8e4b2a91f001111",
-    "sessionId": "ses_abc123xyz789"
+    "opencodeSessionId": "67d1a300c8e4b2a91f003333"
   },
   {
     "matterId": "67d1a1f0c8e4b2a91f001111",
-    "sessionId": "ses_def456uvw000"
+    "opencodeSessionId": "67d1a301c8e4b2a91f003334"
   }
 ]
 ```
@@ -341,6 +421,8 @@ Inside matter `MATTER12868 / Dispute Between X and Y`:
 Outside matters as normal sessions:
 
 - `ses_unfiled001`
+
+The app can also show creator attribution for all three sessions because each one has a row in `opencode_sessions`.
 
 ## Access Rules
 
@@ -380,16 +462,18 @@ If a session is unassigned:
 
 When a matter is selected:
 
-- the UI loads the assigned `sessionId` values for that matter
-- the UI filters the incoming OpenCode session list against those IDs
+- the UI loads the `opencodeSessionId` values assigned to that matter
+- the UI resolves those rows to `sessionId` values from `opencode_sessions`
+- the UI filters the incoming OpenCode session list against those session IDs
 - only matching sessions are shown under that matter
 
 ### Unassigned Sessions
 
-Sessions with no row in `matter_sessions`:
+Tracked sessions with no row in `matter_sessions`:
 
 - remain visible as regular sessions
 - are not hidden by the existence of matters
+- still retain creator attribution through `opencode_sessions`
 
 ### All Sessions View
 
@@ -397,6 +481,97 @@ If the application supports a combined sessions view, it can show:
 
 - matter-assigned sessions grouped under their matter
 - unassigned sessions as regular standalone sessions
+
+## Routing And URL Model
+
+The application should treat chat navigation as URL-addressable app state, not only local client state.
+
+This is important because users need to:
+
+- switch reliably between chats
+- deep-link directly into a chat
+- refresh the page without losing context
+- open a matter or chat in a new tab
+
+### Canonical Routes
+
+Recommended route structure:
+
+- `/agent/chats/:trackedSessionId`
+- `/agent/matters/:matterId`
+- `/agent/matters/:matterId/chats/:trackedSessionId`
+
+Meaning:
+
+- unassigned normal chats live under `/agent/chats/:trackedSessionId`
+- a matter overview lives under `/agent/matters/:matterId`
+- a chat assigned to a matter lives under `/agent/matters/:matterId/chats/:trackedSessionId`
+
+### Route Identifier Choice
+
+The route parameter should use the MongoDB `_id` from `opencode_sessions`, not the raw OpenCode `sessionId`.
+
+Reason:
+
+- `matter_sessions` already points to `opencodeSessionId`
+- the app should own canonical routing
+- OpenCode session ids remain external references
+- the app can still resolve the route to the raw OpenCode `sessionId` before resuming a session
+
+### Canonical Resolution Rule
+
+One tracked session belongs to zero or one matter.
+
+Therefore:
+
+- if a tracked session has no `matter_sessions` row, its canonical route is `/agent/chats/:trackedSessionId`
+- if a tracked session is assigned to a matter, its canonical route is `/agent/matters/:matterId/chats/:trackedSessionId`
+
+This should be treated as a canonical routing rule, not only a display rule.
+
+### Route Loading Behavior
+
+When loading `/agent/chats/:trackedSessionId`:
+
+- the app resolves `trackedSessionId` through `opencode_sessions`
+- the app finds the raw OpenCode `sessionId`
+- the app resumes that OpenCode session
+- the app confirms the tracked session is still unassigned
+
+When loading `/agent/matters/:matterId/chats/:trackedSessionId`:
+
+- the app verifies the user has access through `matter_members`
+- the app verifies the tracked session is linked through `matter_sessions`
+- the app resolves the tracked session to the raw OpenCode `sessionId`
+- the app resumes that OpenCode session
+
+When loading `/agent/matters/:matterId`:
+
+- the app loads matter metadata
+- the app resolves the tracked sessions assigned to that matter
+- the app shows that matter context even before a specific chat is selected
+
+### Redirect Behavior
+
+The app should redirect to the canonical route when needed.
+
+Examples:
+
+- if a tracked session is assigned to a matter later, its canonical route should move from `/agent/chats/:trackedSessionId` to `/agent/matters/:matterId/chats/:trackedSessionId`
+- if a tracked session is unassigned from a matter later, its canonical route should move back to `/agent/chats/:trackedSessionId`
+
+This prevents one chat from having multiple equally valid URLs.
+
+### Why Not Query-Only Routing
+
+A query-only shape such as `/agent?session=...` is weaker for this design because:
+
+- matter context becomes less explicit
+- canonical route rules become less clear
+- nested matter navigation becomes harder to express
+- the route shape stops reflecting the data model cleanly
+
+Path-based routing fits the planned collections more directly.
 
 ## Recommended Constraints
 
@@ -416,22 +591,31 @@ Reason:
 
 - a user should not have duplicate memberships in the same matter
 
-### `matter_sessions`
+### `opencode_sessions`
 
-- unique compound index on `(matterId, sessionId)`
 - unique index on `sessionId`
 
 Reason:
 
+- each OpenCode session should have one metadata row in MongoDB
+
+### `matter_sessions`
+
+- unique compound index on `(matterId, opencodeSessionId)`
+- unique index on `opencodeSessionId`
+
+Reason:
+
 - no duplicate assignment row inside the same matter
-- a session should belong to at most one matter
+- a tracked session should belong to at most one matter
 
 ## Why This Design Fits The Current Application
 
 - OpenCode already owns session creation and session listing.
 - The application already owns user authentication through MongoDB and NextAuth.
 - Matters are application concepts, not OpenCode concepts.
-- The correct approach is therefore to keep matter metadata and permissions in MongoDB and treat OpenCode session IDs as external references.
+- The application also needs creator attribution for sessions, including unassigned sessions.
+- The correct approach is therefore to keep matter metadata, permissions, and app-side session metadata in MongoDB while treating OpenCode session IDs as external references.
 
 ## Implementation Direction For V1
 
@@ -441,10 +625,12 @@ This document is planning only, but the intended V1 behavior is:
 - store the creator in `ownerUserId`
 - create matter memberships in MongoDB
 - add all existing users to `matter_members` when a matter is created
-- assign OpenCode session IDs to matters in MongoDB
-- keep unassigned sessions visible as normal sessions
-- filter matter views by intersecting OpenCode sessions with `matter_sessions`
+- create an `opencode_sessions` row whenever the app creates an OpenCode session
+- assign tracked sessions to matters through `matter_sessions`
+- keep unassigned tracked sessions visible as normal sessions
+- filter matter views by resolving `matter_sessions` to `opencode_sessions` and then intersecting with OpenCode sessions
 - allow any matter member to resume sessions assigned to that matter
+- retain creator attribution for all tracked sessions, including unassigned sessions
 
 ## Summary
 
@@ -452,8 +638,9 @@ This design is based on clear relationship boundaries:
 
 - one matter stores metadata
 - many users can belong to many matters
-- one matter can contain many sessions
-- one session can belong to zero or one matter
+- one tracked session stores creator metadata
+- one matter can contain many tracked sessions
+- one tracked session can belong to zero or one matter
 
 That gives the application:
 

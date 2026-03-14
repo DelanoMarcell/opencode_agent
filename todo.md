@@ -1,5 +1,21 @@
 # Auth — Remaining To-Do
 
+## Matter + Session Routing
+
+1. Add canonical agent routes for chat navigation:
+   `/agent/chats/:trackedSessionId`,
+   `/agent/matters/:matterId`,
+   `/agent/matters/:matterId/chats/:trackedSessionId`.
+2. Use `opencode_sessions._id` as the route `trackedSessionId`, not the raw OpenCode `sessionId`.
+3. Resolve `trackedSessionId` to the raw OpenCode `sessionId` before resuming a session in the agent UI.
+4. Add canonical redirect rules:
+   unassigned tracked sessions resolve to `/agent/chats/:trackedSessionId`,
+   assigned tracked sessions resolve to `/agent/matters/:matterId/chats/:trackedSessionId`.
+5. Add route validation so `/agent/matters/:matterId/chats/:trackedSessionId` verifies:
+   the user is in `matter_members` and the tracked session is linked in `matter_sessions`.
+6. Update the `/agent` sidebar and session selection flow to push canonical URLs instead of relying only on local `selectedSessionID` state.
+7. Add deep-link hydration so opening a canonical chat URL loads the correct tracked session, resolves the raw OpenCode session id, and resumes it automatically.
+
 ## Forgot Password
 
 1. Create API route `POST /api/auth/forgot-password` that generates a time-limited reset token, stores it against the user in MongoDB, and sends an email with the reset link.

@@ -15,10 +15,10 @@ import {
   MoreVertical,
   Pencil,
   Plus,
-  Settings2,
   Shield,
   UserCircle2,
 } from "lucide-react";
+import { signOut } from "next-auth/react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -138,8 +138,10 @@ function RowActionMenu({ kind, title }: RowActionMenuProps) {
           type="button"
           size="icon-xs"
           variant="ghost"
-          className="h-7 w-7 rounded-none border-0 bg-transparent text-(--ink) shadow-none hover:bg-transparent hover:text-(--ink-soft)"
+          className="h-7 w-7 cursor-pointer rounded-none border-0 bg-transparent text-(--ink) shadow-none hover:bg-transparent hover:text-(--ink-soft)"
           aria-label={`Open ${kind} actions for ${title}`}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
         >
           <MoreVertical className="size-3.5" />
         </Button>
@@ -198,7 +200,7 @@ function SidebarBody({
   onToggleMatter,
 }: SidebarBodyProps) {
   return (
-    <div className="flex h-full flex-col bg-(--paper) text-(--ink)">
+    <div className="flex h-full min-w-0 flex-col overflow-x-hidden bg-(--paper) text-(--ink)">
       <div className="border-b-2 border-(--border) bg-(--paper-2) px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -207,13 +209,13 @@ function SidebarBody({
             </p>
             <p className="mt-1 truncate text-sm font-semibold text-(--ink)">Chats and matters</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
                   size="sm"
-                  className="agent-btn-primary h-9 rounded-none border-2 px-3 shadow-none"
+                  className="agent-btn-primary h-9 shrink-0 cursor-pointer rounded-none border-2 px-3 shadow-none"
                 >
                   <Plus className="size-4" />
                   New
@@ -241,8 +243,8 @@ function SidebarBody({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 px-3 py-3">
+      <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
+        <div className="min-w-0 w-full space-y-5 px-3 py-3">
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2 px-1">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
@@ -255,21 +257,22 @@ function SidebarBody({
                 return (
                     <div
                       key={chat.id}
-                      className={`group flex items-center gap-2 border-2 px-2 py-2 transition-colors ${
+                      onClick={() => onSelectItem(chat.id, true)}
+                      className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                         active
                           ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
                           : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
-                      }`}
+                      } cursor-pointer`}
                     >
                     <button
                       type="button"
                       onClick={() => onSelectItem(chat.id, true)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                     >
                       <MessageSquareText className="size-4 shrink-0 text-(--ink-soft)" />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 overflow-hidden">
                         <p className="truncate text-sm font-medium">{chat.title}</p>
-                        <p className="mt-0.5 text-[11px] text-(--ink-muted)">
+                        <p className="truncate mt-0.5 text-[11px] text-(--ink-muted)">
                           {chat.shortID} • {chat.updatedLabel}
                         </p>
                       </div>
@@ -298,21 +301,22 @@ function SidebarBody({
               const isExpanded = expandedMatters[folder.id] ?? false;
 
               return (
-                <div key={folder.id} className="rounded-md">
+                <div key={folder.id} className="w-full min-w-0 rounded-md">
                   <div
-                    className={`group flex items-center gap-2 border-2 px-2 py-2 transition-colors ${
+                    onClick={() => onToggleMatter(folder.id)}
+                    className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                       isExpanded
                         ? "border-(--border) bg-(--surface-interactive)"
                         : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-hover)"
-                    }`}
+                    } cursor-pointer`}
                   >
                     <button
                       type="button"
                       onClick={() => onToggleMatter(folder.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                     >
                       <Folder className="size-4 shrink-0 text-(--ink-soft)" />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 overflow-hidden">
                         <p className="truncate text-sm font-medium">{folder.code}</p>
                         <p className="truncate text-xs text-(--ink-muted)">{folder.title}</p>
                       </div>
@@ -328,28 +332,29 @@ function SidebarBody({
                   </div>
 
                   {isExpanded ? (
-                    <div className="ml-4 mt-1 space-y-1 border-l-2 border-(--border) pl-3">
+                    <div className="ml-4 mt-1 min-w-0 w-full space-y-1 border-l-2 border-(--border) pl-3">
                       {folder.chats.length > 0 ? (
                         folder.chats.map((chat) => {
                           const active = activeItemID === chat.id;
                           return (
                             <div
                               key={chat.id}
-                              className={`group flex items-center gap-2 border-2 px-2 py-2 transition-colors ${
+                              onClick={() => onSelectItem(chat.id, false)}
+                              className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                                 active
                                   ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
                                   : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
-                              }`}
+                              } cursor-pointer`}
                             >
                               <button
                                 type="button"
                                 onClick={() => onSelectItem(chat.id, false)}
-                                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                                className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                               >
                                 <MessageSquareText className="size-4 shrink-0 text-(--ink-muted)" />
-                                <div className="min-w-0 flex-1">
+                                <div className="min-w-0 flex-1 overflow-hidden">
                                   <p className="truncate text-sm">{chat.title}</p>
-                                  <p className="mt-0.5 text-[11px] text-(--ink-muted)">
+                                  <p className="truncate mt-0.5 text-[11px] text-(--ink-muted)">
                                     {chat.shortID} • {chat.updatedLabel}
                                   </p>
                                 </div>
@@ -375,36 +380,15 @@ function SidebarBody({
       </ScrollArea>
 
       <div className="border-t-2 border-(--border) bg-(--paper-2) p-3">
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="agent-btn justify-start rounded-none border-2 shadow-none"
-          >
-            <Settings2 className="size-4" />
-            Settings
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="agent-btn justify-start rounded-none border-2 shadow-none"
-          >
-            <CircleHelp className="size-4" />
-            Support
-          </Button>
-        </div>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex w-full items-center gap-3 border-2 border-(--border) bg-(--surface-light) px-3 py-2.5 text-left hover:bg-(--brand-soft)"
+              className="flex w-full min-w-0 cursor-pointer items-center gap-3 overflow-hidden border-2 border-(--border) bg-(--surface-light) px-3 py-2.5 text-left hover:bg-(--brand-soft)"
             >
               <UserCircle2 className="size-5 shrink-0 text-(--ink)" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">Delan Workspace</p>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <p className="truncate text-sm font-medium">edp2@lnpbeyondlegal.com</p>
                 <p className="truncate text-xs text-(--ink-muted)">
                   Account settings, privacy and logout
                 </p>
@@ -429,12 +413,16 @@ function SidebarBody({
               <CircleHelp className="size-4" />
               Help and support
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem asChild className="agent-menu-item rounded-none">
-              <Link href="/auth/sign-out">
-                <LogOut className="size-4" />
-                Log out
-              </Link>
+              <Link href="/test">Test</Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="agent-menu-item rounded-none"
+              onSelect={() => void signOut({ callbackUrl: "/auth/sign-in" })}
+            >
+              <LogOut className="size-4" />
+              Log out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -509,7 +497,7 @@ export function MatterChatSidebar({
           size="icon"
           variant="outline"
           onClick={() => setIsMobileOpen(true)}
-          className="agent-btn rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+          className="agent-btn cursor-pointer rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
         >
           <Menu className="size-4" />
           <span className="sr-only">Open chat sidebar</span>
@@ -517,7 +505,7 @@ export function MatterChatSidebar({
       </div>
 
       <aside
-        className="agent-panel hidden h-full min-h-0 w-[320px] overflow-hidden border-2 bg-(--paper) lg:flex"
+        className="agent-panel hidden h-full min-h-0 w-[320px] min-w-0 overflow-hidden border-2 bg-(--paper) lg:flex"
       >
         <SidebarBody
           activeItemID={activeItemID}
