@@ -5,8 +5,8 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AuthPromoImage } from "@/components/auth/auth-promo-image";
+import { Spinner } from "@/components/loaders/spinner";
 import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
 
 export default function SignInPage() {
   const router = useRouter();

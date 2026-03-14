@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { signOut } from "next-auth/react";
-import { Spinner } from "@/components/ui/spinner";
+import { Spinner } from "@/components/loaders/spinner";
 
 export default function SignOutPage() {
   useEffect(() => {

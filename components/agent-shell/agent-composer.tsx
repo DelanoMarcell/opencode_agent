@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,7 @@ type AgentComposerProps = {
   sessionCostFormulaTotal: number;
   sessionSpendText: string;
   sessionTotalsRows: Array<StatRow>;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
 };
 
 export function AgentComposer({
@@ -58,11 +59,13 @@ export function AgentComposer({
   sessionCostFormulaTotal,
   sessionSpendText,
   sessionTotalsRows,
+  textareaRef,
 }: AgentComposerProps) {
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
       <div className="space-y-2">
         <Textarea
+          ref={textareaRef}
           value={inputText}
           onChange={(event) => onInputTextChange(event.target.value)}
           onKeyDown={onKeyDown}

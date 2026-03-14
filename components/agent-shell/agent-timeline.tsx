@@ -4,17 +4,20 @@ import type { RefObject } from "react";
 
 import { Streamdown } from "streamdown";
 
+import { ChatHistoryLoader } from "@/components/loaders/chat-history-loader";
 import { Badge } from "@/components/ui/badge";
 import { formatToolResult } from "@/lib/agent-runtime/helpers";
 import type { TimelineItem } from "@/lib/agent-runtime/types";
 
 type AgentTimelineProps = {
+  isLoadingSelectedSession: boolean;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   showThinkingCard: boolean;
   timeline: Array<TimelineItem>;
 };
 
 export function AgentTimeline({
+  isLoadingSelectedSession,
   messagesEndRef,
   showThinkingCard,
   timeline,
@@ -23,7 +26,9 @@ export function AgentTimeline({
     <div className="min-h-0 min-w-0 flex-1">
       <div className="h-full min-w-0" data-slot="timeline-root">
         <div className="min-w-0 space-y-4 px-4 py-4 sm:px-5">
-          {timeline.length === 0 ? (
+          {isLoadingSelectedSession ? (
+            <ChatHistoryLoader />
+          ) : timeline.length === 0 ? (
             <div className="agent-empty min-h-[320px] border-2 border-dashed p-6" />
           ) : (
             timeline.map((item) => {

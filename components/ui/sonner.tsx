@@ -9,7 +9,7 @@ import {
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/loaders/spinner"
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
 
