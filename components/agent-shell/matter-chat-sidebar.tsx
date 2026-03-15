@@ -37,6 +37,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { RecentChatsLoader } from "@/components/loaders/recent-chats-loader";
+import { CreateMatterDialog } from "@/components/agent-shell/create-matter-dialog";
 
 export type MatterChatSidebarSession = {
   trackedSessionId: string;
@@ -61,7 +62,7 @@ type MatterChatSidebarProps = {
   selectedTrackedSessionID: string;
   userEmail: string;
   onCreateChat: () => void;
-  onCreateMatter: () => void;
+  onMatterCreated: (matterID: string) => void;
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (trackedSessionID: string) => void;
 };
@@ -445,11 +446,12 @@ export function MatterChatSidebar({
   selectedTrackedSessionID,
   userEmail,
   onCreateChat,
-  onCreateMatter,
+  onMatterCreated,
   onSelectMatter,
   onSelectSession,
 }: MatterChatSidebarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isCreateMatterOpen, setIsCreateMatterOpen] = useState(false);
   const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -484,6 +486,16 @@ export function MatterChatSidebar({
     setIsMobileOpen(false);
   };
 
+  const handleCreateMatter = () => {
+    setIsMobileOpen(false);
+    setIsCreateMatterOpen(true);
+  };
+
+  const handleMatterCreated = (matterID: string) => {
+    setIsCreateMatterOpen(false);
+    onMatterCreated(matterID);
+  };
+
   const handleToggleMatter = (matterID: string) => {
     setExpandedMatters((current) => ({
       ...current,
@@ -516,7 +528,7 @@ export function MatterChatSidebar({
           recentChats={recentChats}
           userEmail={userEmail}
           onCreateChat={onCreateChat}
-          onCreateMatter={onCreateMatter}
+          onCreateMatter={handleCreateMatter}
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectSession}
           onToggleMatter={handleToggleMatter}
@@ -544,13 +556,19 @@ export function MatterChatSidebar({
             recentChats={recentChats}
             userEmail={userEmail}
             onCreateChat={onCreateChat}
-            onCreateMatter={onCreateMatter}
+            onCreateMatter={handleCreateMatter}
             onSelectMatter={handleSelectMatter}
             onSelectSession={handleSelectSession}
             onToggleMatter={handleToggleMatter}
           />
         </SheetContent>
       </Sheet>
+
+      <CreateMatterDialog
+        open={isCreateMatterOpen}
+        onOpenChange={setIsCreateMatterOpen}
+        onMatterCreated={handleMatterCreated}
+      />
     </>
   );
 }

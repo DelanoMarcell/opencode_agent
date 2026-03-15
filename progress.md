@@ -38,15 +38,15 @@
 - [done] Clear the active session ref and block prompt entry while route auto-resume is hydrating a different chat
 - [done] Move the initial OpenCode session list, provider catalog, selected chat messages, and selected chat status into the server bootstrap so chat routes hydrate from a server snapshot instead of a second client fetch pass
 - [done] Document the new server/client OpenCode bootstrap flow in `docs/agent-chat-route-load-order.md`
-- [ ] Build the matter creation UI flow from the sidebar `New matter folder` action
-- [ ] Add a matter creation form with:
+- [done] Build the matter creation UI flow from the sidebar `New matter folder` action
+- [done] Add a matter creation form with:
   - matter code
   - matter name
   - optional matter description
-- [ ] Wire the matter creation form to `POST /api/matters`
-- [ ] Show create-matter loading, validation, and API error states in the client UI
-- [ ] Route to `/agent/matters/[matterId]` after successful matter creation
-- [ ] Show a proper matter overview / empty state on `/agent/matters/[matterId]` when no chat is selected
+- [done] Wire the matter creation form to `POST /api/matters`
+- [done] Show create-matter loading, validation, and API error states in the client UI
+- [done] Route to `/agent/matters/[matterId]` after successful matter creation
+- [done] Show a proper matter overview / empty state on `/agent/matters/[matterId]` when no chat is selected
 - [ ] Verify that chats created while a matter is selected are assigned to that matter and render under the correct folder
 - [ ] Add UI for assigning an existing tracked chat to a matter using `POST /api/matters/[id]/sessions`
 - [ ] Update client-side matter state after a successful matter create only if we later decide not to rely on the post-create route navigation/bootstrap refresh

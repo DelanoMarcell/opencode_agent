@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { Streamdown } from "streamdown";
 
@@ -10,6 +10,7 @@ import { formatToolResult } from "@/lib/agent-runtime/helpers";
 import type { TimelineItem } from "@/lib/agent-runtime/types";
 
 type AgentTimelineProps = {
+  emptyState?: ReactNode;
   isLoadingSelectedSession: boolean;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   showThinkingCard: boolean;
@@ -17,6 +18,7 @@ type AgentTimelineProps = {
 };
 
 export function AgentTimeline({
+  emptyState,
   isLoadingSelectedSession,
   messagesEndRef,
   showThinkingCard,
@@ -29,7 +31,7 @@ export function AgentTimeline({
           {isLoadingSelectedSession ? (
             <ChatHistoryLoader />
           ) : timeline.length === 0 ? (
-            <div className="agent-empty min-h-[320px] border-2 border-dashed p-6" />
+            emptyState ?? <div className="agent-empty min-h-[320px] border-2 border-dashed p-6" />
           ) : (
             timeline.map((item) => {
               if (item.kind === "user") {

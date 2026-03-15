@@ -6,7 +6,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatSessionOptionLabel } from "@/lib/agent-runtime/helpers";
@@ -16,9 +15,6 @@ type AgentSessionHeaderProps = {
   availableSessions: Array<SessionOption>;
   isBusy: boolean;
   selectedSessionID: string;
-  onLoadSessionOptions: () => void;
-  onResetSession: () => void;
-  onResumeSession: () => void;
   onToggleTrace: () => void;
   showTrace: boolean;
 };
@@ -27,9 +23,6 @@ export function AgentSessionHeader({
   availableSessions,
   isBusy,
   selectedSessionID,
-  onLoadSessionOptions,
-  onResetSession,
-  onResumeSession,
   onToggleTrace,
   showTrace,
 }: AgentSessionHeaderProps) {
@@ -54,16 +47,6 @@ export function AgentSessionHeader({
       >
         {isBusy ? "Running" : "Ready"}
       </Badge>
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        disabled={!selectedSessionID || isBusy}
-        onClick={onResumeSession}
-        className="agent-btn rounded-none border-2 shadow-none"
-      >
-        Resume
-      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -81,22 +64,9 @@ export function AgentSessionHeader({
         >
           <DropdownMenuItem
             className="agent-menu-item cursor-pointer rounded-none hover:bg-(--brand-soft) hover:text-foreground focus:bg-(--brand-soft) focus:text-foreground data-highlighted:bg-(--brand-soft) data-highlighted:text-foreground"
-            onSelect={onLoadSessionOptions}
-          >
-            Refresh Sessions
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="agent-menu-item cursor-pointer rounded-none hover:bg-(--brand-soft) hover:text-foreground focus:bg-(--brand-soft) focus:text-foreground data-highlighted:bg-(--brand-soft) data-highlighted:text-foreground"
             onSelect={onToggleTrace}
           >
             {showTrace ? "Hide Trace" : "Show Trace"}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="agent-menu-item cursor-pointer rounded-none hover:bg-(--brand-soft) hover:text-foreground focus:bg-(--brand-soft) focus:text-foreground data-highlighted:bg-(--brand-soft) data-highlighted:text-foreground"
-            onSelect={onResetSession}
-          >
-            New Session
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

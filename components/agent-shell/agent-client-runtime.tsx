@@ -19,6 +19,7 @@ import {
 
 import { AgentComposer } from "@/components/agent-shell/agent-composer";
 import { AgentInteractivePanel } from "@/components/agent-shell/agent-interactive-panel";
+import { MatterOverviewEmptyState } from "@/components/agent-shell/matter-overview-empty-state";
 import { AgentSessionHeader } from "@/components/agent-shell/agent-session-header";
 import { AgentTimeline } from "@/components/agent-shell/agent-timeline";
 import { AgentTracePanel } from "@/components/agent-shell/agent-trace-panel";
@@ -2315,15 +2316,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [router, trackedSessionsByTrackedID]
   );
 
-  const handleCreateMatter = useCallback(() => {
-    setErrorText("Matter creation UI is not implemented yet.");
-  }, []);
-
-  const handleResumeCurrentSession = useCallback(() => {
-    const targetSessionID = selectedSessionID || sessionIDRef.current;
-    if (!targetSessionID) return;
-    void resumeSession(targetSessionID);
-  }, [resumeSession, selectedSessionID]);
+  const handleMatterCreated = useCallback(
+    (matterID: string) => {
+      setErrorText(null);
+      setSelectedMatterID(matterID);
+      setSelectedTrackedSessionID("");
+      setSelectedSessionID("");
+      router.push(`/agent/matters/${matterID}`);
+    },
+    [router]
+  );
 
   useEffect(() => {
     if (lastRouteSyncKeyRef.current === routeSyncKey) {
@@ -2890,6 +2892,21 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       chats: sidebarSessions.filter((session) => rawSessionIdSet.has(session.rawSessionId)),
     };
   });
+  const activeMatter = selectedMatterID
+    ? matters.find((matter) => matter.id === selectedMatterID)
+    : undefined;
+  const activeMatterChatCount = selectedMatterID
+    ? (matterSessionIdsByMatterId[selectedMatterID] ?? []).length
+    : 0;
+  const timelineEmptyState =
+    !selectedSessionID && activeMatter ? (
+      <MatterOverviewEmptyState
+        code={activeMatter.code}
+        title={activeMatter.title}
+        description={activeMatter.description}
+        chatCount={activeMatterChatCount}
+      />
+    ) : undefined;
 
   return (
     <main className="agent-page h-dvh overflow-hidden p-3 text-foreground sm:p-4">
@@ -2908,7 +2925,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           selectedTrackedSessionID={selectedTrackedSessionID}
           userEmail={bootstrap.user.email}
           onCreateChat={handleCreateChat}
-          onCreateMatter={handleCreateMatter}
+          onMatterCreated={handleMatterCreated}
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectTrackedSession}
         />
@@ -2919,9 +2936,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               availableSessions={availableSessions}
               isBusy={isBusy}
               selectedSessionID={selectedSessionID}
-              onLoadSessionOptions={() => void loadSessionOptions()}
-              onResetSession={resetSession}
-              onResumeSession={handleResumeCurrentSession}
               onToggleTrace={() => setShowTrace((value) => !value)}
               showTrace={showTrace}
             />
@@ -2929,6 +2943,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             <div ref={timelineScrollAreaRef} className="min-h-0 flex-1 min-w-0">
               <ScrollArea type="always" className="h-full min-w-0">
                 <AgentTimeline
+                  emptyState={timelineEmptyState}
                   isLoadingSelectedSession={shouldShowRouteChatLoader}
                   messagesEndRef={messagesEndRef}
                   showThinkingCard={showThinkingCard}
