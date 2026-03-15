@@ -7,6 +7,7 @@ import { Matter } from "@/lib/models/matter";
 import { MatterMember } from "@/lib/models/matter-member";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
+import { fetchOpenCodeBootstrap } from "@/lib/agent/opencode-server";
 import type {
   AgentBootstrap,
   AgentBootstrapMatter,
@@ -94,11 +95,20 @@ export async function buildAgentBootstrap(
     };
   }
 
+  const openCodeBootstrap = await fetchOpenCodeBootstrap({
+    initialRawSessionId: options.initialRawSessionId,
+    trackedRawSessionIds: new Set(Object.keys(trackedSessionsBySessionId)),
+  });
+
   return {
     user,
     matters,
+    availableSessions: openCodeBootstrap.availableSessions,
+    availableSessionsLoaded: openCodeBootstrap.availableSessionsLoaded,
+    modelCatalog: openCodeBootstrap.modelCatalog,
     matterSessionIdsByMatterId,
     trackedSessionsBySessionId,
+    initialSessionSnapshot: openCodeBootstrap.initialSessionSnapshot,
     initialMatterId: options.initialMatterId,
     initialTrackedSessionId: options.initialTrackedSessionId,
     initialRawSessionId: options.initialRawSessionId,

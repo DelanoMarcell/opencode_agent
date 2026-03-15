@@ -16,6 +16,18 @@
 6. Update the `/agent` sidebar and session selection flow to push canonical URLs instead of relying only on local `selectedSessionID` state.
 7. Add deep-link hydration so opening a canonical chat URL loads the correct tracked session, resolves the raw OpenCode session id, and resumes it automatically.
 
+## Deferred Layout Refactor
+
+1. Introduce `app/agent/layout.tsx` so the chat sidebar becomes a persistent shell across `/agent` routes.
+2. Move sidebar/workspace state into a client provider rendered by the `/agent` layout instead of tying sidebar refresh to route changes.
+3. Keep layout data uncached on the server and use client-side optimistic updates plus targeted `router.refresh()` only when the currently rendered server route becomes stale.
+4. Define mutation flows for layout updates:
+   creating a chat,
+   deleting a chat,
+   moving a chat to a matter,
+   creating a matter.
+5. Refactor the current `/agent` runtime so the RHS remains route-driven while the LHS sidebar is owned by the persistent layout.
+
 ## Forgot Password
 
 1. Create API route `POST /api/auth/forgot-password` that generates a time-limited reset token, stores it against the user in MongoDB, and sends an email with the reset link.

@@ -234,6 +234,37 @@ function getLatestAssistantModelLabel(storedMessages: Array<StoredMessage>): str
   return `${providerID}/${modelID}`;
 }
 
+function buildBootstrapSessionState(bootstrap: AgentBootstrap): {
+  isHydrated: boolean;
+  messages: Array<MessageEntry>;
+  partsByMessageID: Map<string, Array<MessagePartEntry>>;
+  timeline: Array<TimelineItem>;
+  sessionStatus: "idle" | "busy" | "retry";
+  storedMessages: Array<StoredMessage>;
+} {
+  const initialSnapshot = bootstrap.initialSessionSnapshot;
+  if (!bootstrap.initialRawSessionId || !initialSnapshot?.loaded) {
+    return {
+      isHydrated: false,
+      messages: [],
+      partsByMessageID: new Map(),
+      timeline: [],
+      sessionStatus: "idle",
+      storedMessages: [],
+    };
+  }
+
+  const nextState = buildMessageStateFromStoredMessages(initialSnapshot.storedMessages);
+  return {
+    isHydrated: true,
+    messages: nextState.messages,
+    partsByMessageID: nextState.partsByMessageID,
+    timeline: buildTimelineFromMessageState(nextState.messages, nextState.partsByMessageID),
+    sessionStatus: initialSnapshot.status,
+    storedMessages: initialSnapshot.storedMessages,
+  };
+}
+
 function isAbortError(error: unknown): boolean {
   if (error instanceof DOMException) {
     return error.name === "AbortError";
@@ -245,20 +276,26 @@ function isAbortError(error: unknown): boolean {
 }
 
 export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProps) {
+  const bootstrapSessionState = buildBootstrapSessionState(bootstrap);
   const pathname = usePathname();
   const router = useRouter();
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
-  const [sessionID, setSessionID] = useState<string | null>(null);
-  const [availableSessions, setAvailableSessions] = useState<Array<SessionOption>>([]);
+  const [sessionID, setSessionID] = useState<string | null>(
+    bootstrapSessionState.isHydrated ? bootstrap.initialRawSessionId ?? null : null
+  );
+  const [availableSessions, setAvailableSessions] = useState<Array<SessionOption>>(
+    bootstrap.availableSessions
+  );
   const [selectedSessionID, setSelectedSessionID] = useState(bootstrap.initialRawSessionId ?? "");
   const [selectedTrackedSessionID, setSelectedTrackedSessionID] = useState(
     bootstrap.initialTrackedSessionId ?? ""
   );
   const [selectedMatterID, setSelectedMatterID] = useState(bootstrap.initialMatterId ?? "");
-  const [matters] = useState(bootstrap.matters);
-  const [isLoadingSessionOptions, setIsLoadingSessionOptions] = useState(true);
+  const [isLoadingSessionOptions, setIsLoadingSessionOptions] = useState(
+    !bootstrap.availableSessionsLoaded
+  );
   const [isLoadingSelectedSession, setIsLoadingSelectedSession] = useState(
-    Boolean(bootstrap.initialRawSessionId)
+    Boolean(bootstrap.initialRawSessionId) && !bootstrapSessionState.isHydrated
   );
   const [matterSessionIdsByMatterId, setMatterSessionIdsByMatterId] = useState<
     Record<string, string[]>
@@ -266,7 +303,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [trackedSessionsBySessionId, setTrackedSessionsBySessionId] = useState<
     Record<string, AgentBootstrapTrackedSession>
   >(bootstrap.trackedSessionsBySessionId);
-  const [timeline, setTimeline] = useState<Array<TimelineItem>>([]);
+  const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
   const [traceLines, setTraceLines] = useState<Array<string>>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -280,11 +317,22 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [activeQuestionIndexByRequest, setActiveQuestionIndexByRequest] = useState<
     Record<string, number>
   >({});
-  const [isBusy, setIsBusy] = useState(false);
+  const [isBusy, setIsBusy] = useState(
+    bootstrapSessionState.isHydrated &&
+      (bootstrapSessionState.sessionStatus === "busy" ||
+        bootstrapSessionState.sessionStatus === "retry")
+  );
   const [runUiPhase, setRunUiPhase] = useState<
     "thinking" | "tool-active" | "assistant-output"
-  >("thinking");
+  >(
+    bootstrapSessionState.isHydrated &&
+      (bootstrapSessionState.sessionStatus === "busy" ||
+        bootstrapSessionState.sessionStatus === "retry")
+      ? deriveRunUiPhaseFromMessageParts(bootstrapSessionState.partsByMessageID)
+      : "thinking"
+  );
   const [showTrace, setShowTrace] = useState(false);
+  const matters = bootstrap.matters;
   const {
     activeContextLimit,
     activeModelKey,
@@ -298,11 +346,21 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     sessionSpendTotal,
     sessionUsageTotals,
     upsertAssistantUsage,
-  } = useAgentUsage();
+  } = useAgentUsage({
+    modelCatalog: bootstrap.modelCatalog.loaded
+      ? {
+          contextLimits: bootstrap.modelCatalog.contextLimits,
+          costs: bootstrap.modelCatalog.costs,
+        }
+      : undefined,
+    storedMessages: bootstrapSessionState.storedMessages,
+  });
 
   const configuredBaseURLRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const sessionIDRef = useRef<string | null>(null);
+  const sessionIDRef = useRef<string | null>(
+    bootstrapSessionState.isHydrated ? bootstrap.initialRawSessionId ?? null : null
+  );
   const sdkClientRef = useRef<ReturnType<typeof createOpencodeClient> | null>(null);
   const eventStreamSupervisorAbortRef = useRef<AbortController | null>(null);
   const eventStreamAbortRef = useRef<AbortController | null>(null);
@@ -316,8 +374,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const interactiveRefreshTimerRef = useRef<number | null>(null);
   const runCompletionInFlightRef = useRef<string | null>(null);
   const timelinePublishFrameRef = useRef<number | null>(null);
-  const messageEntriesRef = useRef<Array<MessageEntry>>([]);
-  const messagePartsByMessageIDRef = useRef<Map<string, Array<MessagePartEntry>>>(new Map());
+  const messageEntriesRef = useRef<Array<MessageEntry>>(bootstrapSessionState.messages);
+  const messagePartsByMessageIDRef = useRef<Map<string, Array<MessagePartEntry>>>(
+    bootstrapSessionState.partsByMessageID
+  );
   const messageRoleByIDRef = useRef<Map<string, "user" | "assistant">>(new Map());
   const partTextSeenRef = useRef<Map<string, string>>(new Map());
   const toolStateSeenRef = useRef<Map<string, string>>(new Map());
@@ -702,7 +762,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, [mutateMessageState]);
 
   const ensureClients = useCallback(() => {
-    if (sessionIDRef.current && configuredBaseURLRef.current !== baseUrl) {
+    if (
+      sessionIDRef.current &&
+      configuredBaseURLRef.current !== null &&
+      configuredBaseURLRef.current !== baseUrl
+    ) {
       throw new Error(
         "Cannot change base URL while a session is active. Start a new session first."
       );
@@ -716,6 +780,18 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     configuredBaseURLRef.current = baseUrl;
     resetModelCatalog();
   }, [baseUrl, resetModelCatalog]);
+
+  const applyModelCatalogSnapshot = useCallback(
+    (catalog: AgentBootstrap["modelCatalog"]) => {
+      if (!catalog.loaded) return false;
+      replaceModelCatalog(
+        new Map<string, number>(Object.entries(catalog.contextLimits)),
+        new Map<string, ModelCostInfo>(Object.entries(catalog.costs))
+      );
+      return true;
+    },
+    [replaceModelCatalog]
+  );
 
   const refreshModelContextLimits = useCallback(async () => {
     try {
@@ -1744,6 +1820,130 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     eventStreamTaskRef.current = task;
   }, [appendTrace, processEvent, resyncActiveSession]);
 
+  const hydrateSessionFromBootstrap = useCallback(
+    async (
+      targetSessionID: string,
+      snapshot: NonNullable<AgentBootstrap["initialSessionSnapshot"]>
+    ) => {
+      const resumeRequestID = ++resumeRequestIDRef.current;
+      const isCurrentResumeRequest = () => resumeRequestIDRef.current === resumeRequestID;
+
+      resumeAbortRef.current?.abort();
+      resumeAbortRef.current = null;
+
+      setErrorText(null);
+      setIsBusy(false);
+      setIsLoadingSelectedSession(false);
+      setSessionID(null);
+      setSelectedSessionID(targetSessionID);
+      setRunUiPhase("thinking");
+
+      sessionIDRef.current = null;
+      messageEntriesRef.current = [];
+      messagePartsByMessageIDRef.current = new Map();
+      pendingOptimisticUserRef.current = null;
+      partTextSeenRef.current.clear();
+      toolStateSeenRef.current.clear();
+      activeAssistantServerMessageIDRef.current = null;
+      activeRunRef.current = null;
+      runCompletionInFlightRef.current = null;
+      statusPollInFlightRef.current = false;
+      setPendingQuestions([]);
+      setPendingPermissions([]);
+      setQuestionDrafts({});
+      setActiveQuestionIndexByRequest({});
+      resetSessionTokenTracking();
+
+      const storedMessages = snapshot.storedMessages;
+      const nextState = buildMessageStateFromStoredMessages(storedMessages);
+      const localUserCount = nextState.messages.reduce(
+        (count, message) => (message.role === "user" ? count + 1 : count),
+        0
+      );
+
+      rebuildSessionUsageFromStoredMessages(storedMessages);
+      rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
+      shouldAutoScrollRef.current = true;
+      replaceMessageState(nextState.messages, nextState.partsByMessageID);
+
+      sessionIDRef.current = targetSessionID;
+      setSessionID(targetSessionID);
+      setSelectedSessionID(targetSessionID);
+
+      if (snapshot.status === "busy" || snapshot.status === "retry") {
+        const resumedRunPartsByMessageID = getResumedRunPartsByMessageID(
+          nextState.messages,
+          nextState.partsByMessageID
+        );
+        const runID = crypto.randomUUID();
+        const fail = (error: Error) => {
+          if (activeRunRef.current?.id === runID) {
+            activeRunRef.current = null;
+          }
+          setIsBusy(false);
+          setErrorText(error.message);
+          markAssistantCardsComplete();
+        };
+
+        const finish = () => {
+          if (activeRunRef.current?.id === runID) {
+            activeRunRef.current = null;
+          }
+          setIsBusy(false);
+        };
+
+        activeRunRef.current = {
+          id: runID,
+          sessionID: targetSessionID,
+          assistantText: "",
+          startObserved: didSnapshotCaptureActiveRun(storedMessages, localUserCount),
+          pollRecoveryEligible: true,
+          model: getLatestAssistantModelLabel(storedMessages),
+          toolCalls: collectToolCallsFromMessageParts(resumedRunPartsByMessageID),
+          fail,
+          finish,
+        };
+        streamLastEventAtRef.current = Date.now();
+        setIsBusy(true);
+        setRunUiPhase(deriveRunUiPhaseFromMessageParts(resumedRunPartsByMessageID));
+      } else {
+        activeRunRef.current = null;
+        markAssistantCardsComplete();
+        setIsBusy(false);
+        setRunUiPhase("thinking");
+      }
+
+      appendTrace(`session hydrated from server: ${targetSessionID} [status: ${snapshot.status}]`);
+      scheduleInteractiveRefresh(0);
+
+      try {
+        ensureClients();
+        await ensureEventStream();
+        if (!bootstrap.modelCatalog.loaded) {
+          await refreshModelContextLimits();
+        }
+      } catch (error) {
+        if (!isCurrentResumeRequest()) {
+          return;
+        }
+        appendTrace(`server snapshot live-connect error: ${toErrorMessage(error)}`);
+      }
+    },
+    [
+      appendTrace,
+      bootstrap.modelCatalog.loaded,
+      ensureClients,
+      ensureEventStream,
+      markAssistantCardsComplete,
+      rebuildEventCachesFromMessageState,
+      rebuildSessionUsageFromStoredMessages,
+      refreshModelContextLimits,
+      replaceMessageState,
+      resetSessionTokenTracking,
+      scheduleInteractiveRefresh,
+    ]
+  );
+
   const loadSessionOptions = useCallback(async () => {
     const requestID = ++sessionOptionsRequestIDRef.current;
     const isCurrentRequest = () => sessionOptionsRequestIDRef.current === requestID;
@@ -2110,14 +2310,32 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     }
     lastRouteSyncKeyRef.current = routeSyncKey;
 
-    resumeRequestIDRef.current += 1;
     setSelectedMatterID(bootstrap.initialMatterId ?? "");
     setSelectedTrackedSessionID(bootstrap.initialTrackedSessionId ?? "");
     setSelectedSessionID(bootstrap.initialRawSessionId ?? "");
-    setIsLoadingSelectedSession(Boolean(bootstrap.initialRawSessionId));
+    setTrackedSessionsBySessionId(bootstrap.trackedSessionsBySessionId);
+    setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
+    setAvailableSessions(bootstrap.availableSessions);
+    setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
+    setIsLoadingSelectedSession(
+      Boolean(bootstrap.initialRawSessionId) && !bootstrap.initialSessionSnapshot?.loaded
+    );
 
-    void loadSessionOptions();
-    void refreshModelContextLimits();
+    if (!applyModelCatalogSnapshot(bootstrap.modelCatalog)) {
+      void refreshModelContextLimits();
+    }
+
+    if (!bootstrap.availableSessionsLoaded) {
+      void loadSessionOptions();
+    }
+
+    if (bootstrap.initialRawSessionId && bootstrap.initialSessionSnapshot?.loaded) {
+      void hydrateSessionFromBootstrap(
+        bootstrap.initialRawSessionId,
+        bootstrap.initialSessionSnapshot
+      );
+      return;
+    }
 
     if (bootstrap.initialRawSessionId) {
       void resumeSession(bootstrap.initialRawSessionId);
@@ -2151,12 +2369,18 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       markAssistantCardsComplete();
     }
   }, [
+    applyModelCatalogSnapshot,
+    bootstrap.availableSessions,
+    bootstrap.availableSessionsLoaded,
+    bootstrap.initialSessionSnapshot,
     loadSessionOptions,
     markAssistantCardsComplete,
+    hydrateSessionFromBootstrap,
     refreshModelContextLimits,
     resetSessionTokenTracking,
     routeSyncKey,
     resumeSession,
+    bootstrap.modelCatalog,
   ]);
 
   useEffect(() => {

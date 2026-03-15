@@ -1,3 +1,9 @@
+import type {
+  ModelCostInfo,
+  SessionOption,
+  StoredMessage,
+} from "@/lib/agent-runtime/types";
+
 export type AgentBootstrapMatter = {
   id: string;
   code: string;
@@ -22,11 +28,27 @@ export type AgentBootstrapUser = {
   name: string | null;
 };
 
+export type AgentBootstrapModelCatalog = {
+  loaded: boolean;
+  contextLimits: Record<string, number>;
+  costs: Record<string, ModelCostInfo>;
+};
+
+export type AgentBootstrapSessionSnapshot = {
+  loaded: boolean;
+  storedMessages: Array<StoredMessage>;
+  status: "idle" | "busy" | "retry";
+};
+
 export type AgentBootstrap = {
   user: AgentBootstrapUser;
   matters: Array<AgentBootstrapMatter>;
+  availableSessions: Array<SessionOption>;
+  availableSessionsLoaded: boolean;
+  modelCatalog: AgentBootstrapModelCatalog;
   matterSessionIdsByMatterId: Record<string, string[]>;
   trackedSessionsBySessionId: Record<string, AgentBootstrapTrackedSession>;
+  initialSessionSnapshot?: AgentBootstrapSessionSnapshot;
   initialMatterId?: string;
   initialTrackedSessionId?: string;
   initialRawSessionId?: string;

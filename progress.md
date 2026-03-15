@@ -36,6 +36,8 @@
 - [done] Add abortable session list/resume requests to prevent loaders from hanging across rapid route changes
 - [done] Clear stale interactive requests and usage metrics when route sync removes the active session
 - [done] Clear the active session ref and block prompt entry while route auto-resume is hydrating a different chat
+- [done] Move the initial OpenCode session list, provider catalog, selected chat messages, and selected chat status into the server bootstrap so chat routes hydrate from a server snapshot instead of a second client fetch pass
+- [done] Document the new server/client OpenCode bootstrap flow in `docs/agent-chat-route-load-order.md`
 - [ ] Build the matter creation UI flow from the sidebar `New matter folder` action
 - [ ] Add a matter creation form with:
   - matter code

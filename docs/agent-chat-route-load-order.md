@@ -4,80 +4,99 @@ This document describes what happens, in order, when a route like:
 
 - `/agent/chats/:trackedSessionId`
 
-loads in the app.
+loads in the app after the server-side OpenCode bootstrap change.
 
 ## End-to-End Order
 
 1. **Next.js server route runs**
-- [page.tsx](/mnt/c/Users/Delan/desktop/lnp_agent/app/agent/chats/[trackedSessionId]/page.tsx)
+- [page.tsx](/mnt/c/users/delan/desktop/lnp_agent/app/agent/chats/[trackedSessionId]/page.tsx)
 - reads `trackedSessionId` from the URL
 
 2. **Auth is checked**
-- calls `requireAuthenticatedAgentUser()` from [bootstrap.ts](/mnt/c/Users/Delan/desktop/lnp_agent/lib/agent/bootstrap.ts)
+- calls `requireAuthenticatedAgentUser()` from [bootstrap.ts](/mnt/c/users/delan/desktop/lnp_agent/lib/agent/bootstrap.ts)
 
 3. **Tracked session is resolved**
-- calls `resolveTrackedSession(trackedSessionId)` in [route-resolvers.ts](/mnt/c/Users/Delan/desktop/lnp_agent/lib/agent/route-resolvers.ts)
+- calls `resolveTrackedSession(trackedSessionId)` in [route-resolvers.ts](/mnt/c/users/delan/desktop/lnp_agent/lib/agent/route-resolvers.ts)
 - this looks up the Mongo `opencode_sessions` row
 - if it finds a matter assignment, the route redirects to:
   - `/agent/matters/:matterId/chats/:trackedSessionId`
 
-4. **Bootstrap data is built**
-- calls `buildAgentBootstrap(...)` in [bootstrap.ts](/mnt/c/Users/Delan/desktop/lnp_agent/lib/agent/bootstrap.ts)
-- this loads:
+4. **Server bootstrap is built**
+- [buildAgentBootstrap(...)](/mnt/c/users/delan/desktop/lnp_agent/lib/agent/bootstrap.ts) loads:
   - accessible matters
-  - tracked sessions
-  - matter-session mappings
-- and includes:
-  - `initialTrackedSessionId`
-  - `initialRawSessionId`
+  - tracked session metadata from Mongo
+  - matter-session mappings from Mongo
+- it then calls [fetchOpenCodeBootstrap(...)](/mnt/c/users/delan/desktop/lnp_agent/lib/agent/opencode-server.ts) to fetch from OpenCode:
+  - `session.list()`
+  - `provider.list()`
+  - and, for selected chat routes, `session.messages()` + `session.status()`
 
-5. **Server renders the client runtime**
-- renders [agent-client-runtime.tsx](/mnt/c/Users/Delan/desktop/lnp_agent/components/agent-shell/agent-client-runtime.tsx)
-- with the bootstrap payload
+5. **Server filters OpenCode data before sending it down**
+- the raw OpenCode session list is filtered against tracked Mongo sessions
+- only tracked sessions become `bootstrap.availableSessions`
+- the selected chat route includes:
+  - `bootstrap.initialSessionSnapshot.storedMessages`
+  - `bootstrap.initialSessionSnapshot.status`
 
-6. **Client runtime mounts**
-- initial state is seeded from bootstrap:
-  - `selectedTrackedSessionID`
-  - `selectedSessionID`
-  - `selectedMatterID`
-- this happens near the top of [agent-client-runtime.tsx](/mnt/c/Users/Delan/desktop/lnp_agent/components/agent-shell/agent-client-runtime.tsx)
+6. **Server renders the client runtime with hydrated data**
+- [agent-client-runtime.tsx](/mnt/c/users/delan/desktop/lnp_agent/components/agent-shell/agent-client-runtime.tsx)
+- receives a bootstrap payload that already contains:
+  - filtered sidebar chats
+  - provider/model catalog
+  - selected chat messages and status, when applicable
 
-7. **Client starts background setup**
-- `loadSessionOptions()` runs
-- `refreshModelContextLimits()` runs
-- this fetches the OpenCode session list and provider/model metadata
+7. **Client runtime mounts from server snapshot**
+- initial client state is seeded directly from bootstrap:
+  - sidebar sessions
+  - selected matter/chat ids
+  - timeline items for the selected chat
+  - model/context/spend metadata
+  - busy/idle state for the selected chat
 
-8. **Auto-resume effect runs**
-- the effect checks `bootstrap.initialRawSessionId`
-- if present, it calls `resumeSession()`
-- see [agent-client-runtime.tsx](/mnt/c/Users/Delan/desktop/lnp_agent/components/agent-shell/agent-client-runtime.tsx)
+8. **Client route sync consumes bootstrap first**
+- on route change, the runtime now prefers the server snapshot
+- if `bootstrap.initialSessionSnapshot` exists, it hydrates the chat from that snapshot instead of immediately calling `session.messages()` and `session.status()` again
+- if the server could not provide OpenCode data, the runtime falls back to the older client-side fetch path
 
-9. **`resumeSession()` rebuilds chat state**
-- clears old local runtime state
-- ensures OpenCode clients exist
-- ensures event stream is connected
-- fetches stored messages with `client.session.messages(...)`
-- rebuilds the timeline from those messages
+9. **Client reconnects for live behavior**
+- after the server snapshot is applied, the client still:
+  - creates/reuses the OpenCode SDK client
+  - ensures the event stream is connected
+  - refreshes interactive requests
+- this is what keeps:
+  - streaming output
+  - permission prompts
+  - questions
+  - status updates
+  working live after the initial render
 
-10. **Session status is checked**
-- `resumeSession()` then calls `client.session.status()`
-- if status is `busy` or `retry`:
-  - rebuilds `activeRunRef`
-  - sets `isBusy = true`
-  - derives `runUiPhase`
-- if status is `idle`:
-  - leaves the session as non-busy
+10. **Ongoing chat behavior remains client-side**
+- prompting
+- event processing
+- run-state updates
+- optimistic UI
+- interactive request replies
 
-11. **Polling / streaming continue**
-- if the resumed session is busy:
-  - the polling effect starts
-  - incoming stream events continue updating the UI
-- if idle:
-  - the restored finished chat is shown with no active run state
+## Why This Change Exists
+
+Before this change, the route did two visible loading phases:
+
+1. server route/loading boundary
+2. client-side OpenCode hydration for:
+   - sidebar sessions
+   - selected chat history
+   - session status
+   - provider metadata
+
+After this change:
+
+- the server provides the initial OpenCode snapshot
+- the client continues from that snapshot
+- the client no longer needs to rediscover the selected chat immediately after the page has already loaded
 
 ## Summary
 
 In short:
 
-- **server side**: auth -> resolve tracked session -> build bootstrap
-- **client side**: mount runtime -> fetch OpenCode session list -> auto-resume selected chat -> fetch messages -> check status -> continue live updates
+- **server side**: auth -> resolve tracked session -> load Mongo metadata -> fetch OpenCode snapshot -> filter -> send hydrated bootstrap
+- **client side**: mount from hydrated snapshot -> connect live OpenCode event stream -> continue chatting

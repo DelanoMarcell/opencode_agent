@@ -15,16 +15,91 @@ import type {
 } from "@/lib/agent-runtime/types";
 import { EMPTY_TOKEN_USAGE } from "@/lib/agent-runtime/types";
 
-export function useAgentUsage() {
-  const [activeModelKey, setActiveModelKey] = useState<string | null>(null);
-  const [activeContextLimit, setActiveContextLimit] = useState<number | null>(null);
-  const [latestContextUsage, setLatestContextUsage] = useState<TokenUsageTotals | null>(null);
-  const [sessionUsageTotals, setSessionUsageTotals] = useState<TokenUsageTotals>(EMPTY_TOKEN_USAGE);
-  const [sessionSpendTotal, setSessionSpendTotal] = useState(0);
+type InitialAgentUsageOptions = {
+  modelCatalog?: {
+    contextLimits: Record<string, number>;
+    costs: Record<string, ModelCostInfo>;
+  };
+  storedMessages?: Array<StoredMessage>;
+};
 
-  const assistantUsageByMessageIDRef = useRef<Map<string, AssistantUsageSnapshot>>(new Map());
-  const modelContextLimitByKeyRef = useRef<Map<string, number>>(new Map());
-  const modelCostByKeyRef = useRef<Map<string, ModelCostInfo>>(new Map());
+function buildInitialAgentUsageState(options: InitialAgentUsageOptions) {
+  const modelContextLimitByKey = new Map<string, number>(
+    Object.entries(options.modelCatalog?.contextLimits ?? {})
+  );
+  const modelCostByKey = new Map<string, ModelCostInfo>(
+    Object.entries(options.modelCatalog?.costs ?? {})
+  );
+  const assistantUsageByMessageID = new Map<string, AssistantUsageSnapshot>();
+  const orderedMessages = [...(options.storedMessages ?? [])].sort(
+    (left, right) => left.info.time.created - right.info.time.created
+  );
+
+  let activeModelKey: string | null = null;
+  let latestContextUsage: TokenUsageTotals | null = null;
+  let sessionUsageTotals = { ...EMPTY_TOKEN_USAGE };
+  let sessionSpendTotal = 0;
+
+  for (const message of orderedMessages) {
+    const snapshot = parseAssistantUsageFromInfo(message.info);
+    if (!snapshot) continue;
+
+    assistantUsageByMessageID.set(snapshot.messageID, snapshot);
+    sessionSpendTotal += snapshot.cost;
+    sessionUsageTotals = sumTokenUsageTotals(sessionUsageTotals, snapshot.usage);
+    if (snapshot.modelKey) {
+      activeModelKey = snapshot.modelKey;
+    }
+    if (snapshot.usage && snapshot.usage.output > 0) {
+      latestContextUsage = snapshot.usage;
+    }
+  }
+
+  return {
+    activeContextLimit: activeModelKey
+      ? modelContextLimitByKey.get(activeModelKey) ?? null
+      : null,
+    activeModelKey,
+    assistantUsageByMessageID,
+    latestContextUsage,
+    modelContextLimitByKey,
+    modelCostByKey,
+    sessionSpendTotal,
+    sessionUsageTotals,
+  };
+}
+
+export function useAgentUsage(options: InitialAgentUsageOptions = {}) {
+  const initialStateRef = useRef<ReturnType<typeof buildInitialAgentUsageState> | null>(null);
+  if (initialStateRef.current === null) {
+    initialStateRef.current = buildInitialAgentUsageState(options);
+  }
+
+  const [activeModelKey, setActiveModelKey] = useState<string | null>(
+    initialStateRef.current.activeModelKey
+  );
+  const [activeContextLimit, setActiveContextLimit] = useState<number | null>(
+    initialStateRef.current.activeContextLimit
+  );
+  const [latestContextUsage, setLatestContextUsage] = useState<TokenUsageTotals | null>(
+    initialStateRef.current.latestContextUsage
+  );
+  const [sessionUsageTotals, setSessionUsageTotals] = useState<TokenUsageTotals>(
+    initialStateRef.current.sessionUsageTotals
+  );
+  const [sessionSpendTotal, setSessionSpendTotal] = useState(
+    initialStateRef.current.sessionSpendTotal
+  );
+
+  const assistantUsageByMessageIDRef = useRef<Map<string, AssistantUsageSnapshot>>(
+    initialStateRef.current.assistantUsageByMessageID
+  );
+  const modelContextLimitByKeyRef = useRef<Map<string, number>>(
+    initialStateRef.current.modelContextLimitByKey
+  );
+  const modelCostByKeyRef = useRef<Map<string, ModelCostInfo>>(
+    initialStateRef.current.modelCostByKey
+  );
 
   const rebuildSessionUsageSummary = useCallback(() => {
     const orderedSnapshots = [...assistantUsageByMessageIDRef.current.values()].sort(
