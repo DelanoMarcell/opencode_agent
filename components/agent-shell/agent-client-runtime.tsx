@@ -516,13 +516,29 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     ) as HTMLDivElement | null;
   }, []);
 
-  useEffect(() => {
-    if (!shouldAutoScrollRef.current) return;
+  const scrollTimelineToBottom = useCallback(() => {
+    const viewport = getTimelineViewport();
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
     messagesEndRef.current?.scrollIntoView({
-      behavior: isBusy ? "auto" : "smooth",
+      behavior: "auto",
       block: "end",
     });
-  }, [timeline, isBusy, runUiPhase]);
+  }, [getTimelineViewport]);
+
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    scrollTimelineToBottom();
+
+    const frameID = window.requestAnimationFrame(() => {
+      scrollTimelineToBottom();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameID);
+    };
+  }, [runUiPhase, scrollTimelineToBottom, timeline]);
 
   useEffect(() => {
     const viewport = getTimelineViewport();
@@ -762,10 +778,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, [mutateMessageState]);
 
   const ensureClients = useCallback(() => {
+    const isRealBaseUrlChange =
+      configuredBaseURLRef.current !== null && configuredBaseURLRef.current !== baseUrl;
+
     if (
       sessionIDRef.current &&
-      configuredBaseURLRef.current !== null &&
-      configuredBaseURLRef.current !== baseUrl
+      isRealBaseUrlChange
     ) {
       throw new Error(
         "Cannot change base URL while a session is active. Start a new session first."
@@ -776,9 +794,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return;
     }
 
+    if (isRealBaseUrlChange) {
+      resetModelCatalog();
+    }
+
     sdkClientRef.current = createOpencodeClient({ baseUrl });
     configuredBaseURLRef.current = baseUrl;
-    resetModelCatalog();
   }, [baseUrl, resetModelCatalog]);
 
   const applyModelCatalogSnapshot = useCallback(

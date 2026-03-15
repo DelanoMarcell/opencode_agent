@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ChevronDown,
@@ -148,8 +148,47 @@ function SidebarBody({
   onSelectSession,
   onToggleMatter,
 }: SidebarBodyProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeTrackedSessionID) return;
+    if (!rootRef.current || rootRef.current.getClientRects().length === 0) return;
+
+    const frameID = window.requestAnimationFrame(() => {
+      const viewport = rootRef.current?.querySelector(
+        '[data-slot="scroll-area-viewport"]'
+      ) as HTMLDivElement | null;
+      const activeRow = rootRef.current?.querySelector(
+        '[data-active-sidebar-session="true"]'
+      ) as HTMLDivElement | null;
+
+      if (!viewport || !activeRow) return;
+
+      const viewportRect = viewport.getBoundingClientRect();
+      const activeRowRect = activeRow.getBoundingClientRect();
+      const isFullyVisible =
+        activeRowRect.top >= viewportRect.top &&
+        activeRowRect.bottom <= viewportRect.bottom;
+
+      if (isFullyVisible) return;
+
+      activeRow?.scrollIntoView({
+        block: "start",
+        inline: "nearest",
+        behavior: "smooth",
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameID);
+    };
+  }, [activeTrackedSessionID, expandedMatters]);
+
   return (
-    <div className="flex h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-background text-foreground">
+    <div
+      ref={rootRef}
+      className="flex h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-background text-foreground"
+    >
       <div className="border-b-2 border-(--border) bg-(--paper-2) px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -210,6 +249,7 @@ function SidebarBody({
                   <div
                     key={chat.trackedSessionId}
                     onClick={() => onSelectSession(chat.trackedSessionId)}
+                    data-active-sidebar-session={active ? "true" : undefined}
                     className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                       active
                         ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
@@ -302,6 +342,7 @@ function SidebarBody({
                               <div
                                 key={chat.trackedSessionId}
                                 onClick={() => onSelectSession(chat.trackedSessionId)}
+                                data-active-sidebar-session={active ? "true" : undefined}
                                 className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                                   active
                                     ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
@@ -380,9 +421,7 @@ function SidebarBody({
               <CircleHelp className="size-4" />
               Help and support
             </DropdownMenuItem>
-            <DropdownMenuItem asChild className="agent-menu-item rounded-none">
-              <Link href="/test">Test</Link>
-            </DropdownMenuItem>
+           
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="agent-menu-item rounded-none"

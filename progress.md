@@ -45,11 +45,11 @@
   - optional matter description
 - [ ] Wire the matter creation form to `POST /api/matters`
 - [ ] Show create-matter loading, validation, and API error states in the client UI
-- [ ] Update client-side matter state after a successful matter create so the new matter appears without a full reload
 - [ ] Route to `/agent/matters/[matterId]` after successful matter creation
 - [ ] Show a proper matter overview / empty state on `/agent/matters/[matterId]` when no chat is selected
-- [ ] Add UI for assigning an existing tracked chat to a matter using `POST /api/matters/[id]/sessions`
 - [ ] Verify that chats created while a matter is selected are assigned to that matter and render under the correct folder
+- [ ] Add UI for assigning an existing tracked chat to a matter using `POST /api/matters/[id]/sessions`
+- [ ] Update client-side matter state after a successful matter create only if we later decide not to rely on the post-create route navigation/bootstrap refresh
 - [ ] Add matter-specific loaders once matter chat lists have their own client-side hydration path
 - [ ] Run a verification pass and update this file with final status
 

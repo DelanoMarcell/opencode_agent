@@ -20,6 +20,7 @@ function SignInPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const justRegistered = searchParams.get("registered") === "true";
+  const callbackUrl = searchParams.get("callbackUrl") || "/agent";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,6 +40,7 @@ function SignInPageInner() {
       email,
       password,
       redirect: false,
+      callbackUrl,
     });
 
     setLoading(false);
@@ -48,7 +50,7 @@ function SignInPageInner() {
       return;
     }
 
-    router.push("/agent");
+    router.push(res?.url ?? callbackUrl);
     router.refresh();
   }
 
