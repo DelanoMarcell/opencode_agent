@@ -414,10 +414,14 @@ function SidebarBody({
                             event.stopPropagation();
                             onToggleMatter(matter.id);
                           }}
-                          className={`shrink-0 cursor-pointer rounded-none p-1 ${
-                            matterActive ? "text-foreground" : "text-(--ink-muted)"
+                          className={`inline-flex shrink-0 cursor-pointer items-center rounded-none border p-1 transition-colors ${
+                            matterActive
+                              ? "border-(--border) text-foreground"
+                              : "border-(--border) text-(--ink-muted) hover:text-foreground"
                           }`}
-                          aria-label={`Toggle ${matter.code}`}
+                          aria-expanded={isExpanded}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${matter.code}`}
+                          title={isExpanded ? "Collapse folder" : "Expand folder"}
                         >
                           <ChevronDown
                             className={`size-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}

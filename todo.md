@@ -15,6 +15,50 @@
 5. Consider timeline virtualization only after reducing the SSR payload.
    Recommendation: virtualization is a secondary optimization for very long chats with heavy markdown/code blocks, not the first fix.
 
+## Replace `session.list()`-Driven Sidebar Metadata With Mongo Metadata
+
+1. Move sidebar display ownership to Mongo for routes that do not need full OpenCode session discovery.
+   Goal: stop relying on OpenCode `session.list()` for LHS rendering when the app already knows which tracked sessions exist.
+2. Extend tracked session storage to include local sidebar metadata.
+   Add or derive enough data for display rows:
+   `rawSessionId`
+   `title`
+   `createdAt`
+   `updatedAt`
+   Keep using Mongo as the source of truth for route ids and matter assignment.
+3. Stop depending on OpenCode session titles.
+   Recommendation: define an app-owned title policy.
+   First choice: set title from the first user message snippet.
+   Fallback: `Untitled`.
+4. Update tracked-session creation flow.
+   When a new tracked session is first registered, initialize local metadata in Mongo rather than waiting for `session.list()`.
+5. Update chat metadata only on coarse lifecycle events.
+   Do not write on every stream chunk.
+   Update Mongo metadata when:
+   - a session is created
+   - the first prompt assigns the title
+   - a user sends a prompt
+   - optionally when a run completes if ordering needs tightening
+6. Route-by-route data source after the change.
+   `/agent/matters`: Mongo only for LHS and matter list.
+   `/agent/matters/:matterId`: Mongo only for matter details and expanded matter chat rows.
+   `/agent`: Mongo only for recent chats list.
+   `/agent/chats/:trackedSessionId`: Mongo for sidebar rows, OpenCode only for the selected chat messages/status.
+   `/agent/matters/:matterId/chats/:trackedSessionId`: Mongo for matter folder rows, OpenCode only for the selected chat messages/status.
+7. Keep OpenCode responsible only for selected-chat runtime data.
+   OpenCode remains the source of truth for:
+   - selected chat messages
+   - selected chat status
+   - prompt sending
+   - live event stream
+   - provider/model catalog
+8. Add migration/backfill for existing tracked sessions.
+   Existing Mongo rows currently do not store title or updated time, so add a one-time backfill strategy before removing `session.list()` entirely.
+9. Remove `availableSessions` / `session.list()` dependency from sidebar rendering after migration.
+   Refactor `AgentClientRuntime` and bootstrap so sidebar rows are built directly from Mongo-backed tracked session metadata instead of filtered OpenCode session metadata.
+10. Treat this as architecture cleanup, not the primary OOM diagnosis.
+    Current conclusion: `session.list()` returns metadata only, so this is a worthwhile simplification and pressure reduction, but it is not yet proven to be the main cause of the recent dev-server memory crash.
+
 # Auth — Remaining To-Do
 
 ## Matter + Session Routing

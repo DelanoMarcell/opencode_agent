@@ -2917,6 +2917,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const activeMatter = selectedMatterID
     ? matters.find((matter) => matter.id === selectedMatterID)
     : undefined;
+  const composerPlaceholder = isMatterSelectionRequired
+    ? "Select a matter folder to start a chat..."
+    : workspaceMode === "matters" && activeMatter && !selectedSessionID
+      ? `New chat in ${activeMatter.title}...`
+      : "Write a message...";
   const timelineEmptyState =
     !selectedSessionID && workspaceMode === "matters"
       ? activeMatter ? (
@@ -2998,6 +3003,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ) : null}
 
           <AgentComposer
+            composerPlaceholder={composerPlaceholder}
             contextBreakdownRows={contextBreakdownRows}
             contextUsageText={contextUsageText}
             inputText={inputText}

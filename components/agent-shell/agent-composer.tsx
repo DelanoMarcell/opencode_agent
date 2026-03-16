@@ -28,6 +28,7 @@ type StatRow = {
 };
 
 type AgentComposerProps = {
+  composerPlaceholder: string;
   contextBreakdownRows: Array<StatRow>;
   contextUsageText: string;
   inputText: string;
@@ -48,6 +49,7 @@ type AgentComposerProps = {
 };
 
 export function AgentComposer({
+  composerPlaceholder,
   contextBreakdownRows,
   contextUsageText,
   inputText,
@@ -81,11 +83,7 @@ export function AgentComposer({
           value={inputText}
           onChange={(event) => onInputTextChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={
-            isMatterSelectionRequired
-              ? "Select a matter folder to start a chat..."
-              : "Write a message..."
-          }
+          placeholder={composerPlaceholder}
           className="agent-field min-h-16 max-h-40 overflow-y-auto resize-none rounded-none border-2 shadow-none"
           disabled={isComposerDisabled}
         />
