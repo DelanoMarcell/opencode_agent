@@ -3,7 +3,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowRight,
-  Archive,
   ChevronDown,
   CircleHelp,
   FileText,
@@ -21,6 +20,10 @@ import {
 import { signOut } from "next-auth/react";
 
 import { CreateMatterDialog } from "@/components/agent-shell/create-matter-dialog";
+import {
+  EditMatterDialog,
+  type EditableMatter,
+} from "@/components/agent-shell/edit-matter-dialog";
 import { RecentChatsLoader } from "@/components/loaders/recent-chats-loader";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +54,7 @@ export type MatterChatSidebarMatter = {
   id: string;
   code: string;
   title: string;
+  description?: string;
   chats: Array<MatterChatSidebarSession>;
 };
 
@@ -97,6 +101,7 @@ type MatterChatSidebarProps = {
   workspaceMode: WorkspaceMode;
   onCreateChat: () => void;
   onMatterCreated: (matterID: string) => void;
+  onMatterUpdated: (matter: EditableMatter) => void;
   onOpenChatsWorkspace: () => void;
   onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
@@ -106,9 +111,14 @@ type MatterChatSidebarProps = {
 type RowActionMenuProps = {
   kind: "chat" | "matter";
   title: string;
+  onEditMatter?: () => void;
 };
 
-function RowActionMenu({ kind, title }: RowActionMenuProps) {
+function RowActionMenu({ kind, title, onEditMatter }: RowActionMenuProps) {
+  function stopMenuEvent(event: Event) {
+    event.stopPropagation();
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -128,29 +138,44 @@ function RowActionMenu({ kind, title }: RowActionMenuProps) {
         align="end"
         className="agent-menu w-44 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
       >
-        <DropdownMenuItem className="agent-menu-item rounded-none py-2">
-          <Pencil className="size-4" />
-          Rename
-        </DropdownMenuItem>
         {kind === "matter" ? (
-          <DropdownMenuItem className="agent-menu-item rounded-none py-2">
-            <FileText className="size-4" />
-            Matter files
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem className="agent-menu-item rounded-none py-2">
-          {kind === "matter" ? (
-            <>
-              <Archive className="size-4" />
-              Archive folder
-            </>
-          ) : (
-            <>
+          <>
+            <DropdownMenuItem
+              className="agent-menu-item rounded-none py-2"
+              onSelect={(event) => {
+                stopMenuEvent(event);
+                onEditMatter?.();
+              }}
+            >
+              <Pencil className="size-4" />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="agent-menu-item rounded-none py-2"
+              onSelect={stopMenuEvent}
+            >
+              <FileText className="size-4" />
+              Matter files
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            <DropdownMenuItem
+              className="agent-menu-item rounded-none py-2"
+              onSelect={stopMenuEvent}
+            >
+              <Pencil className="size-4" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="agent-menu-item rounded-none py-2"
+              onSelect={stopMenuEvent}
+            >
               <FolderInput className="size-4" />
               Move to matter
-            </>
-          )}
-        </DropdownMenuItem>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -172,6 +197,7 @@ type SidebarBodyProps = {
   onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (trackedSessionID: string) => void;
+  onEditMatter: (matterID: string) => void;
   onToggleMatter: (matterID: string) => void;
 };
 
@@ -191,6 +217,7 @@ function SidebarBody({
   onOpenMattersWorkspace,
   onSelectMatter,
   onSelectSession,
+  onEditMatter,
   onToggleMatter,
 }: SidebarBodyProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -307,7 +334,6 @@ function SidebarBody({
                   return (
                     <div
                       key={chat.trackedSessionId}
-                      onClick={() => onSelectSession(chat.trackedSessionId)}
                       data-active-sidebar-item={active ? "true" : undefined}
                       data-active-sidebar-session={active ? "true" : undefined}
                       className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
@@ -372,7 +398,6 @@ function SidebarBody({
                       className="w-full min-w-0 rounded-md"
                     >
                       <div
-                        onClick={() => onSelectMatter(matter.id)}
                         className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
                           matterActive
                             ? "border-(--border) border-l-4 bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
@@ -433,7 +458,11 @@ function SidebarBody({
                           />
                         </button>
                         <div className="shrink-0">
-                          <RowActionMenu kind="matter" title={matter.title} />
+                          <RowActionMenu
+                            kind="matter"
+                            title={matter.title}
+                            onEditMatter={() => onEditMatter(matter.id)}
+                          />
                         </div>
                       </div>
 
@@ -444,7 +473,6 @@ function SidebarBody({
                             return (
                               <div
                                 key={chat.trackedSessionId}
-                                onClick={() => onSelectSession(chat.trackedSessionId)}
                                 data-active-sidebar-item={active ? "true" : undefined}
                                 data-active-sidebar-session={active ? "true" : undefined}
                                 className={`group relative flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors before:absolute before:-left-4 before:top-1/2 before:h-px before:w-3 before:-translate-y-1/2 before:bg-(--border) ${
@@ -552,6 +580,7 @@ export function MatterChatSidebar({
   workspaceMode,
   onCreateChat,
   onMatterCreated,
+  onMatterUpdated,
   onOpenChatsWorkspace,
   onOpenMattersWorkspace,
   onSelectMatter,
@@ -559,9 +588,14 @@ export function MatterChatSidebar({
 }: MatterChatSidebarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCreateMatterOpen, setIsCreateMatterOpen] = useState(false);
+  const [isEditMatterOpen, setIsEditMatterOpen] = useState(false);
+  const [editingMatterID, setEditingMatterID] = useState<string | null>(null);
   const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>(() =>
     buildExpandedMattersState(matters, selectedMatterID, selectedTrackedSessionID)
   );
+  const editingMatter = editingMatterID
+    ? (matters.find((matter) => matter.id === editingMatterID) ?? null)
+    : null;
 
   useLayoutEffect(() => {
     setExpandedMatters((current) =>
@@ -587,6 +621,18 @@ export function MatterChatSidebar({
   const handleMatterCreated = (matterID: string) => {
     setIsCreateMatterOpen(false);
     onMatterCreated(matterID);
+  };
+
+  const handleEditMatter = (matterID: string) => {
+    setEditingMatterID(matterID);
+    setIsMobileOpen(false);
+    setIsEditMatterOpen(true);
+  };
+
+  const handleMatterUpdated = (matter: EditableMatter) => {
+    setIsEditMatterOpen(false);
+    setEditingMatterID(null);
+    onMatterUpdated(matter);
   };
 
   const handleToggleMatter = (matterID: string) => {
@@ -628,6 +674,7 @@ export function MatterChatSidebar({
           onOpenMattersWorkspace={onOpenMattersWorkspace}
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectSession}
+          onEditMatter={handleEditMatter}
           onToggleMatter={handleToggleMatter}
         />
       </aside>
@@ -660,6 +707,7 @@ export function MatterChatSidebar({
             onOpenMattersWorkspace={onOpenMattersWorkspace}
             onSelectMatter={handleSelectMatter}
             onSelectSession={handleSelectSession}
+            onEditMatter={handleEditMatter}
             onToggleMatter={handleToggleMatter}
           />
         </SheetContent>
@@ -669,6 +717,26 @@ export function MatterChatSidebar({
         open={isCreateMatterOpen}
         onOpenChange={setIsCreateMatterOpen}
         onMatterCreated={handleMatterCreated}
+      />
+      <EditMatterDialog
+        open={isEditMatterOpen}
+        matter={
+          editingMatter
+            ? {
+                id: editingMatter.id,
+                code: editingMatter.code,
+                title: editingMatter.title,
+                description: editingMatter.description,
+              }
+            : null
+        }
+        onOpenChange={(open) => {
+          setIsEditMatterOpen(open);
+          if (!open) {
+            setEditingMatterID(null);
+          }
+        }}
+        onMatterUpdated={handleMatterUpdated}
       />
     </>
   );

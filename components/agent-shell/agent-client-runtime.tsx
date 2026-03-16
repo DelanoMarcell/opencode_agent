@@ -85,6 +85,7 @@ import type {
 } from "@/lib/agent-runtime/types";
 import type {
   AgentBootstrap,
+  AgentBootstrapMatter,
   AgentBootstrapTrackedSession,
 } from "@/lib/agent/types";
 
@@ -305,6 +306,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [trackedSessionsBySessionId, setTrackedSessionsBySessionId] = useState<
     Record<string, AgentBootstrapTrackedSession>
   >(bootstrap.trackedSessionsBySessionId);
+  const [matters, setMatters] = useState<Array<AgentBootstrapMatter>>(bootstrap.matters);
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
   const [traceLines, setTraceLines] = useState<Array<string>>([]);
@@ -334,7 +336,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       : "thinking"
   );
   const [showTrace, setShowTrace] = useState(false);
-  const matters = bootstrap.matters;
   const workspaceMode = bootstrap.workspaceMode;
   const {
     activeContextLimit,
@@ -2328,6 +2329,26 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [router]
   );
 
+  const handleMatterUpdated = useCallback((updatedMatter: {
+    id: string;
+    code: string;
+    title: string;
+    description?: string;
+  }) => {
+    setMatters((current) =>
+      current.map((matter) =>
+        matter.id === updatedMatter.id
+          ? {
+              ...matter,
+              code: updatedMatter.code,
+              title: updatedMatter.title,
+              description: updatedMatter.description,
+            }
+          : matter
+      )
+    );
+  }, []);
+
   const handleOpenChatsWorkspace = useCallback(() => {
     router.push("/agent");
   }, [router]);
@@ -2345,6 +2366,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setSelectedMatterID(bootstrap.initialMatterId ?? "");
     setSelectedTrackedSessionID(bootstrap.initialTrackedSessionId ?? "");
     setSelectedSessionID(bootstrap.initialRawSessionId ?? "");
+    setMatters(bootstrap.matters);
     setTrackedSessionsBySessionId(bootstrap.trackedSessionsBySessionId);
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
@@ -2910,6 +2932,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             id: matter.id,
             code: matter.code,
             title: matter.title,
+            description: matter.description,
             chats: sidebarSessions.filter((session) => rawSessionIdSet.has(session.rawSessionId)),
           };
         })
@@ -2955,6 +2978,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           workspaceMode={workspaceMode}
           onCreateChat={handleCreateChat}
           onMatterCreated={handleMatterCreated}
+          onMatterUpdated={handleMatterUpdated}
           onOpenChatsWorkspace={handleOpenChatsWorkspace}
           onOpenMattersWorkspace={handleOpenMattersWorkspace}
           onSelectMatter={handleSelectMatter}

@@ -121,3 +121,18 @@
 
 17. Remove any leftover Microsoft/Azure AD references if still present in env or docs.
 18. Add `.env.example` with required auth environment variables (`MONGODB_URI`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`).
+
+# Low Priority
+
+## Sidebar New Chat Visibility (Post-Session Creation)
+
+1. Show a new chat row in the LHS only after all three succeed on first send:
+   - OpenCode `session.create()` returns a real `sessionId`
+   - `POST /api/opencode-sessions` creates/returns the tracked Mongo row
+   - first `promptAsync(...)` call succeeds
+2. Scope by route:
+   - `/agent`: add row under Recent chats
+   - `/agent/matters/:matterId`: add row under the selected matter folder
+3. Use real session id only (no temporary client-side fake ids).
+4. Initial label should be `New chat` (or `Untitled`) until a title is available.
+5. Replace label with actual title once `session.list()` returns a non-empty title for that session.
