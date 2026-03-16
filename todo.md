@@ -1,3 +1,20 @@
+# High Priority
+
+## SSR Chat Memory Pressure
+
+1. Reduce SSR-selected chat history size on chat routes.
+   Current issue: chat routes SSR up to `1000` stored messages plus session status, which can create heavy server payloads and large client hydration cost for long chats.
+2. Keep SSR for only the most recent chat window plus status.
+   Recommendation: send only the latest `50-100` messages server-side for:
+   `/agent/chats/:trackedSessionId`
+   `/agent/matters/:matterId/chats/:trackedSessionId`.
+3. Load older chat history client-side on demand.
+   Recommendation: fetch older messages only when needed, for example when the user scrolls upward or requests more history.
+4. Preserve current SSR benefits while shrinking memory use.
+   Recommendation: keep server-side status, latest messages, and session metadata so route loads still feel immediate.
+5. Consider timeline virtualization only after reducing the SSR payload.
+   Recommendation: virtualization is a secondary optimization for very long chats with heavy markdown/code blocks, not the first fix.
+
 # Auth — Remaining To-Do
 
 ## Matter + Session Routing

@@ -4,6 +4,8 @@ import type {
   StoredMessage,
 } from "@/lib/agent-runtime/types";
 
+export type AgentWorkspaceMode = "chats" | "matters";
+
 export type AgentBootstrapMatter = {
   id: string;
   code: string;
@@ -41,6 +43,7 @@ export type AgentBootstrapSessionSnapshot = {
 };
 
 export type AgentBootstrap = {
+  workspaceMode: AgentWorkspaceMode;
   user: AgentBootstrapUser;
   matters: Array<AgentBootstrapMatter>;
   availableSessions: Array<SessionOption>;

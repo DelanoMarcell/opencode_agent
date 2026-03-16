@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import AgentClientRuntime from "@/components/agent-shell/agent-client-runtime";
 import {
-  buildAgentBootstrap,
+  buildMatterWorkspaceBootstrap,
   requireAuthenticatedAgentUser,
 } from "@/lib/agent/bootstrap";
 import { resolveMatterAccess } from "@/lib/agent/route-resolvers";
@@ -22,7 +22,7 @@ export default async function AgentMatterPage({ params }: AgentMatterPageProps) 
     notFound();
   }
 
-  const bootstrap = await buildAgentBootstrap(user, {
+  const bootstrap = await buildMatterWorkspaceBootstrap(user, {
     initialMatterId: matter.id,
   });
 

@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   Archive,
   ChevronDown,
   CircleHelp,
@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 
+import { CreateMatterDialog } from "@/components/agent-shell/create-matter-dialog";
+import { RecentChatsLoader } from "@/components/loaders/recent-chats-loader";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,8 +38,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { RecentChatsLoader } from "@/components/loaders/recent-chats-loader";
-import { CreateMatterDialog } from "@/components/agent-shell/create-matter-dialog";
 
 export type MatterChatSidebarSession = {
   trackedSessionId: string;
@@ -54,15 +54,51 @@ export type MatterChatSidebarMatter = {
   chats: Array<MatterChatSidebarSession>;
 };
 
+function buildExpandedMattersState(
+  matters: Array<MatterChatSidebarMatter>,
+  selectedMatterID: string,
+  selectedTrackedSessionID: string,
+  current: Record<string, boolean> = {}
+): Record<string, boolean> {
+  const next = { ...current };
+  const activeMatterForSelectedChat = selectedTrackedSessionID
+    ? matters.find((matter) =>
+        matter.chats.some((chat) => chat.trackedSessionId === selectedTrackedSessionID)
+      )?.id
+    : undefined;
+
+  for (const matter of matters) {
+    if (!(matter.id in next)) {
+      next[matter.id] = false;
+    }
+  }
+
+  if (selectedMatterID) {
+    next[selectedMatterID] = true;
+  }
+
+  if (activeMatterForSelectedChat) {
+    next[activeMatterForSelectedChat] = true;
+  }
+
+  return next;
+}
+
+type WorkspaceMode = "chats" | "matters";
+
 type MatterChatSidebarProps = {
+  canCreateChat: boolean;
   isLoadingRecentChats: boolean;
   matters: Array<MatterChatSidebarMatter>;
   recentChats: Array<MatterChatSidebarSession>;
   selectedMatterID: string;
   selectedTrackedSessionID: string;
   userEmail: string;
+  workspaceMode: WorkspaceMode;
   onCreateChat: () => void;
   onMatterCreated: (matterID: string) => void;
+  onOpenChatsWorkspace: () => void;
+  onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (trackedSessionID: string) => void;
 };
@@ -123,13 +159,17 @@ function RowActionMenu({ kind, title }: RowActionMenuProps) {
 type SidebarBodyProps = {
   activeMatterID: string;
   activeTrackedSessionID: string;
+  canCreateChat: boolean;
   expandedMatters: Record<string, boolean>;
   isLoadingRecentChats: boolean;
   matters: Array<MatterChatSidebarMatter>;
   recentChats: Array<MatterChatSidebarSession>;
   userEmail: string;
+  workspaceMode: WorkspaceMode;
   onCreateChat: () => void;
   onCreateMatter: () => void;
+  onOpenChatsWorkspace: () => void;
+  onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (trackedSessionID: string) => void;
   onToggleMatter: (matterID: string) => void;
@@ -138,21 +178,26 @@ type SidebarBodyProps = {
 function SidebarBody({
   activeMatterID,
   activeTrackedSessionID,
+  canCreateChat,
   expandedMatters,
   isLoadingRecentChats,
   matters,
   recentChats,
   userEmail,
+  workspaceMode,
   onCreateChat,
   onCreateMatter,
+  onOpenChatsWorkspace,
+  onOpenMattersWorkspace,
   onSelectMatter,
   onSelectSession,
   onToggleMatter,
 }: SidebarBodyProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const activeSidebarItemID = activeTrackedSessionID || activeMatterID;
 
   useEffect(() => {
-    if (!activeTrackedSessionID) return;
+    if (!activeSidebarItemID) return;
     if (!rootRef.current || rootRef.current.getClientRects().length === 0) return;
 
     const frameID = window.requestAnimationFrame(() => {
@@ -160,7 +205,7 @@ function SidebarBody({
         '[data-slot="scroll-area-viewport"]'
       ) as HTMLDivElement | null;
       const activeRow = rootRef.current?.querySelector(
-        '[data-active-sidebar-session="true"]'
+        '[data-active-sidebar-item="true"]'
       ) as HTMLDivElement | null;
 
       if (!viewport || !activeRow) return;
@@ -173,7 +218,7 @@ function SidebarBody({
 
       if (isFullyVisible) return;
 
-      activeRow?.scrollIntoView({
+      activeRow.scrollIntoView({
         block: "start",
         inline: "nearest",
         behavior: "smooth",
@@ -183,7 +228,7 @@ function SidebarBody({
     return () => {
       window.cancelAnimationFrame(frameID);
     };
-  }, [activeTrackedSessionID, expandedMatters]);
+  }, [activeSidebarItemID, expandedMatters]);
 
   return (
     <div
@@ -191,200 +236,251 @@ function SidebarBody({
       className="flex h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-background text-foreground"
     >
       <div className="border-b-2 border-(--border) bg-(--paper-2) px-3 py-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--ink-soft)">
               Workspace
             </p>
-            <p className="mt-1 truncate text-sm font-semibold text-foreground">Chats and matters</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="agent-btn-primary h-9 shrink-0 cursor-pointer rounded-none border-2 px-3 shadow-none"
-                >
-                  <Plus className="size-4" />
-                  New
-                  <ChevronDown className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                onCloseAutoFocus={(event) => event.preventDefault()}
-                className="agent-menu w-48 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                className="agent-btn-primary h-9 shrink-0 cursor-pointer rounded-none border-2 px-3 shadow-none"
               >
-                <DropdownMenuItem onSelect={onCreateChat} className="agent-menu-item rounded-none">
+                <Plus className="size-4" />
+                New
+                <ChevronDown className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(event) => event.preventDefault()}
+              className="agent-menu w-48 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+            >
+              {canCreateChat ? (
+                <DropdownMenuItem
+                  onSelect={onCreateChat}
+                  className="agent-menu-item rounded-none"
+                >
                   <MessageSquareText className="size-4" />
                   New chat
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={onCreateMatter}
-                  className="agent-menu-item rounded-none"
-                >
-                  <Folder className="size-4" />
-                  New matter folder
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+              ) : null}
+              <DropdownMenuItem
+                onSelect={onCreateMatter}
+                className="agent-menu-item rounded-none"
+              >
+                <Folder className="size-4" />
+                New matter folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
       <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
         <div className="min-w-0 w-full space-y-5 px-3 py-3">
-          <section className="space-y-2">
-            <div className="flex items-center justify-between gap-2 px-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                Recent chats
-              </p>
-            </div>
-            {isLoadingRecentChats && recentChats.length === 0 ? (
-              <RecentChatsLoader />
-            ) : recentChats.length > 0 ? (
-              recentChats.map((chat) => {
-                const active = activeTrackedSessionID === chat.trackedSessionId;
-                return (
-                  <div
-                    key={chat.trackedSessionId}
-                    onClick={() => onSelectSession(chat.trackedSessionId)}
-                    data-active-sidebar-session={active ? "true" : undefined}
-                    className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
-                      active
-                        ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
-                        : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
-                    } cursor-pointer`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onSelectSession(chat.trackedSessionId)}
-                      className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
-                    >
-                      <MessageSquareText className="size-4 shrink-0 text-(--ink-soft)" />
-                      <div className="min-w-0 flex-1 overflow-hidden">
-                        <p className="truncate text-sm font-medium">{chat.title}</p>
-                        <p className="mt-0.5 truncate text-[11px] text-(--ink-muted)">
-                          {chat.shortID} • {chat.updatedLabel}
-                        </p>
-                      </div>
-                    </button>
-                    <div className="shrink-0">
-                      <RowActionMenu kind="chat" title={chat.title} />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-4 text-sm text-(--ink-muted)">
-                No tracked chats yet.
+          {workspaceMode === "chats" ? (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                  Recent chats
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenMattersWorkspace}
+                  className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft) transition-colors hover:text-foreground"
+                  aria-label="Open matters workspace"
+                >
+                  Matters
+                  <ArrowRight className="size-3.5" />
+                </button>
               </div>
-            )}
-          </section>
-
-          <section className="space-y-2 border-t-2 border-(--border) pt-4">
-            <div className="px-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                Matter folders
-              </p>
-            </div>
-
-            {matters.length > 0 ? (
-              matters.map((matter) => {
-                const isExpanded = expandedMatters[matter.id] ?? false;
-                const matterActive = activeMatterID === matter.id && !activeTrackedSessionID;
-
-                return (
-                  <div key={matter.id} className="w-full min-w-0 rounded-md">
+              {isLoadingRecentChats && recentChats.length === 0 ? (
+                <RecentChatsLoader />
+              ) : recentChats.length > 0 ? (
+                recentChats.map((chat) => {
+                  const active = activeTrackedSessionID === chat.trackedSessionId;
+                  return (
                     <div
-                      onClick={() => onSelectMatter(matter.id)}
+                      key={chat.trackedSessionId}
+                      onClick={() => onSelectSession(chat.trackedSessionId)}
+                      data-active-sidebar-item={active ? "true" : undefined}
+                      data-active-sidebar-session={active ? "true" : undefined}
                       className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
-                        matterActive || isExpanded
-                          ? "border-(--border) bg-(--surface-interactive)"
-                          : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-hover)"
+                        active
+                          ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
+                          : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
                       } cursor-pointer`}
                     >
                       <button
                         type="button"
-                        onClick={() => onSelectMatter(matter.id)}
+                        onClick={() => onSelectSession(chat.trackedSessionId)}
                         className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                       >
-                        <Folder className="size-4 shrink-0 text-(--ink-soft)" />
+                        <MessageSquareText className="size-4 shrink-0 text-(--ink-soft)" />
                         <div className="min-w-0 flex-1 overflow-hidden">
-                          <p className="truncate text-sm font-medium">{matter.code}</p>
-                          <p className="truncate text-xs text-(--ink-muted)">{matter.title}</p>
+                          <p className="truncate text-sm font-medium">{chat.title}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-(--ink-muted)">
+                            {chat.shortID} • {chat.updatedLabel}
+                          </p>
                         </div>
                       </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleMatter(matter.id);
-                        }}
-                        className="shrink-0 cursor-pointer rounded-none p-1 text-(--ink-muted)"
-                        aria-label={`Toggle ${matter.code}`}
-                      >
-                        <ChevronDown
-                          className={`size-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
-                        />
-                      </button>
                       <div className="shrink-0">
-                        <RowActionMenu kind="matter" title={matter.title} />
+                        <RowActionMenu kind="chat" title={chat.title} />
                       </div>
                     </div>
+                  );
+                })
+              ) : (
+                <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-4 text-sm text-(--ink-muted)">
+                  No tracked chats yet.
+                </div>
+              )}
+            </section>
+          ) : null}
 
-                    {isExpanded ? (
-                      <div className="ml-4 mt-1 min-w-0 w-full space-y-1 border-l-2 border-(--border) pl-3">
-                        {matter.chats.length > 0 ? (
-                          matter.chats.map((chat) => {
-                            const active = activeTrackedSessionID === chat.trackedSessionId;
-                            return (
-                              <div
-                                key={chat.trackedSessionId}
-                                onClick={() => onSelectSession(chat.trackedSessionId)}
-                                data-active-sidebar-session={active ? "true" : undefined}
-                                className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
-                                  active
-                                    ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
-                                    : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
-                                } cursor-pointer`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => onSelectSession(chat.trackedSessionId)}
-                                  className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
-                                >
-                                  <MessageSquareText className="size-4 shrink-0 text-(--ink-muted)" />
-                                  <div className="min-w-0 flex-1 overflow-hidden">
-                                    <p className="truncate text-sm">{chat.title}</p>
-                                    <p className="mt-0.5 truncate text-[11px] text-(--ink-muted)">
-                                      {chat.shortID} • {chat.updatedLabel}
-                                    </p>
-                                  </div>
-                                </button>
-                                <div className="shrink-0">
-                                  <RowActionMenu kind="chat" title={chat.title} />
-                                </div>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-3 text-xs text-(--ink-muted)">
-                            Empty matter folder
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-4 text-sm text-(--ink-muted)">
-                No matter folders yet.
+          {workspaceMode === "matters" ? (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                  Matter folders
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenChatsWorkspace}
+                  className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft) transition-colors hover:text-foreground"
+                  aria-label="Open chats workspace"
+                >
+                  Chats
+                  <ArrowRight className="size-3.5" />
+                </button>
               </div>
-            )}
-          </section>
+
+              {matters.length > 0 ? (
+                matters.map((matter) => {
+                  const isExpanded = expandedMatters[matter.id] ?? false;
+                  const matterActive = activeMatterID === matter.id;
+
+                  return (
+                    <div
+                      key={matter.id}
+                      data-active-sidebar-item={matterActive ? "true" : undefined}
+                      className="w-full min-w-0 rounded-md"
+                    >
+                      <div
+                        onClick={() => onSelectMatter(matter.id)}
+                        className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
+                          matterActive
+                            ? "border-(--border) border-l-[6px] bg-(--paper-3) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.06)]"
+                            : isExpanded
+                              ? "border-(--border) bg-(--surface-interactive)"
+                            : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-hover)"
+                        } cursor-pointer`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectMatter(matter.id)}
+                          className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
+                        >
+                          <Folder
+                            className={`size-4 shrink-0 ${
+                              matterActive ? "text-foreground" : "text-(--ink-soft)"
+                            }`}
+                          />
+                          <div className="min-w-0 flex-1 overflow-hidden">
+                            <p
+                              className={`truncate text-sm font-medium ${
+                                matterActive ? "text-foreground" : ""
+                              }`}
+                            >
+                              {matter.code}
+                            </p>
+                            <p
+                              className={`truncate text-xs ${
+                                matterActive ? "text-(--ink-soft)" : "text-(--ink-muted)"
+                              }`}
+                            >
+                              {matter.title}
+                            </p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleMatter(matter.id);
+                          }}
+                          className={`shrink-0 cursor-pointer rounded-none p-1 ${
+                            matterActive ? "text-foreground" : "text-(--ink-muted)"
+                          }`}
+                          aria-label={`Toggle ${matter.code}`}
+                        >
+                          <ChevronDown
+                            className={`size-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                          />
+                        </button>
+                        <div className="shrink-0">
+                          <RowActionMenu kind="matter" title={matter.title} />
+                        </div>
+                      </div>
+
+                      {isExpanded ? (
+                        <div className="ml-4 mt-1 min-w-0 space-y-1 border-l-2 border-(--border) pl-3">
+                          {matter.chats.length > 0 ? (
+                            matter.chats.map((chat) => {
+                              const active = activeTrackedSessionID === chat.trackedSessionId;
+                              return (
+                                <div
+                                  key={chat.trackedSessionId}
+                                  onClick={() => onSelectSession(chat.trackedSessionId)}
+                                  data-active-sidebar-item={active ? "true" : undefined}
+                                  data-active-sidebar-session={active ? "true" : undefined}
+                                  className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
+                                    active
+                                      ? "border-(--border) bg-(--brand-soft) shadow-[4px_4px_0_rgba(var(--shadow-ink),0.08)]"
+                                      : "border-transparent bg-transparent hover:border-(--border) hover:bg-(--surface-light)"
+                                  } cursor-pointer`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectSession(chat.trackedSessionId)}
+                                    className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
+                                  >
+                                    <MessageSquareText className="size-4 shrink-0 text-(--ink-muted)" />
+                                    <div className="min-w-0 flex-1 overflow-hidden">
+                                      <p className="truncate text-sm">{chat.title}</p>
+                                      <p className="mt-0.5 truncate text-[11px] text-(--ink-muted)">
+                                        {chat.shortID} • {chat.updatedLabel}
+                                      </p>
+                                    </div>
+                                  </button>
+                                  <div className="shrink-0">
+                                    <RowActionMenu kind="chat" title={chat.title} />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-3 text-xs text-(--ink-muted)">
+                              Empty matter folder
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="border-2 border-dashed border-(--border) bg-(--surface-light) px-3 py-4 text-sm text-(--ink-muted)">
+                  No matter folders yet.
+                </div>
+              )}
+            </section>
+          ) : null}
         </div>
       </ScrollArea>
 
@@ -422,7 +518,6 @@ function SidebarBody({
               <CircleHelp className="size-4" />
               Help and support
             </DropdownMenuItem>
-           
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="agent-menu-item rounded-none"
@@ -439,45 +534,35 @@ function SidebarBody({
 }
 
 export function MatterChatSidebar({
+  canCreateChat,
   isLoadingRecentChats,
   matters,
   recentChats,
   selectedMatterID,
   selectedTrackedSessionID,
   userEmail,
+  workspaceMode,
   onCreateChat,
   onMatterCreated,
+  onOpenChatsWorkspace,
+  onOpenMattersWorkspace,
   onSelectMatter,
   onSelectSession,
 }: MatterChatSidebarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCreateMatterOpen, setIsCreateMatterOpen] = useState(false);
-  const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>({});
+  const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>(() =>
+    buildExpandedMattersState(matters, selectedMatterID, selectedTrackedSessionID)
+  );
 
-  useEffect(() => {
-    setExpandedMatters((current) => {
-      const next = { ...current };
-
-      for (const matter of matters) {
-        if (!(matter.id in next)) {
-          next[matter.id] = matter.id === selectedMatterID;
-        }
-      }
-
-      if (selectedMatterID) {
-        next[selectedMatterID] = true;
-      }
-
-      return next;
-    });
-  }, [matters, selectedMatterID]);
+  useLayoutEffect(() => {
+    setExpandedMatters((current) =>
+      buildExpandedMattersState(matters, selectedMatterID, selectedTrackedSessionID, current)
+    );
+  }, [matters, selectedMatterID, selectedTrackedSessionID]);
 
   const handleSelectMatter = (matterID: string) => {
     onSelectMatter(matterID);
-    setExpandedMatters((current) => ({
-      ...current,
-      [matterID]: true,
-    }));
     setIsMobileOpen(false);
   };
 
@@ -522,13 +607,17 @@ export function MatterChatSidebar({
         <SidebarBody
           activeMatterID={selectedMatterID}
           activeTrackedSessionID={selectedTrackedSessionID}
+          canCreateChat={canCreateChat}
           expandedMatters={expandedMatters}
           isLoadingRecentChats={isLoadingRecentChats}
           matters={matters}
           recentChats={recentChats}
           userEmail={userEmail}
+          workspaceMode={workspaceMode}
           onCreateChat={onCreateChat}
           onCreateMatter={handleCreateMatter}
+          onOpenChatsWorkspace={onOpenChatsWorkspace}
+          onOpenMattersWorkspace={onOpenMattersWorkspace}
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectSession}
           onToggleMatter={handleToggleMatter}
@@ -550,13 +639,17 @@ export function MatterChatSidebar({
           <SidebarBody
             activeMatterID={selectedMatterID}
             activeTrackedSessionID={selectedTrackedSessionID}
+            canCreateChat={canCreateChat}
             expandedMatters={expandedMatters}
             isLoadingRecentChats={isLoadingRecentChats}
             matters={matters}
             recentChats={recentChats}
             userEmail={userEmail}
+            workspaceMode={workspaceMode}
             onCreateChat={onCreateChat}
             onCreateMatter={handleCreateMatter}
+            onOpenChatsWorkspace={onOpenChatsWorkspace}
+            onOpenMattersWorkspace={onOpenMattersWorkspace}
             onSelectMatter={handleSelectMatter}
             onSelectSession={handleSelectSession}
             onToggleMatter={handleToggleMatter}

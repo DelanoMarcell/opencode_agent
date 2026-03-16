@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import AgentClientRuntime from "@/components/agent-shell/agent-client-runtime";
 import {
-  buildAgentBootstrap,
+  buildChatWorkspaceBootstrap,
   requireAuthenticatedAgentUser,
 } from "@/lib/agent/bootstrap";
 import { resolveTrackedSession } from "@/lib/agent/route-resolvers";
@@ -26,7 +26,7 @@ export default async function AgentChatPage({ params }: AgentChatPageProps) {
     redirect(`/agent/matters/${trackedSession.matterId}/chats/${trackedSession.id}`);
   }
 
-  const bootstrap = await buildAgentBootstrap(user, {
+  const bootstrap = await buildChatWorkspaceBootstrap(user, {
     initialTrackedSessionId: trackedSession.id,
     initialRawSessionId: trackedSession.rawSessionId,
   });

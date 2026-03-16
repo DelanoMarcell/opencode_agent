@@ -18,7 +18,6 @@ const matterMemberSchema = new Schema(
   },
   { timestamps: true }
 );
-
 // Prevents the same user from being added to the same matter more than once.
 matterMemberSchema.index({ matterId: 1, userId: 1 }, { unique: true });
 

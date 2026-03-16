@@ -67,12 +67,12 @@ function buildModelCatalog(providers: Array<ProviderListItem>): AgentBootstrapMo
 
 type FetchOpenCodeBootstrapOptions = {
   initialRawSessionId?: string;
-  trackedRawSessionIds: Set<string>;
+  visibleRawSessionIds: Set<string>;
 };
 
 export async function fetchOpenCodeBootstrap({
   initialRawSessionId,
-  trackedRawSessionIds,
+  visibleRawSessionIds,
 }: FetchOpenCodeBootstrapOptions): Promise<{
   availableSessions: Array<SessionOption>;
   availableSessionsLoaded: boolean;
@@ -110,7 +110,7 @@ export async function fetchOpenCodeBootstrap({
     sessionsResult && "data" in sessionsResult && !sessionsResult.error
       ? [...(sessionsResult.data ?? [])]
           .sort((left, right) => right.time.updated - left.time.updated)
-          .filter((session) => trackedRawSessionIds.has(session.id))
+          .filter((session) => visibleRawSessionIds.has(session.id))
           .map((session) => ({
             id: session.id,
             title: session.title,

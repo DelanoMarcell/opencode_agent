@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import AgentClientRuntime from "@/components/agent-shell/agent-client-runtime";
 import {
-  buildAgentBootstrap,
+  buildMatterWorkspaceBootstrap,
   requireAuthenticatedAgentUser,
 } from "@/lib/agent/bootstrap";
 import {
@@ -43,7 +43,7 @@ export default async function AgentMatterChatPage({
     );
   }
 
-  const bootstrap = await buildAgentBootstrap(user, {
+  const bootstrap = await buildMatterWorkspaceBootstrap(user, {
     initialMatterId: resolved.matter.id,
     initialTrackedSessionId: resolved.trackedSession.id,
     initialRawSessionId: resolved.trackedSession.rawSessionId,

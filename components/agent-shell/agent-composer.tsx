@@ -32,6 +32,7 @@ type AgentComposerProps = {
   contextUsageText: string;
   inputText: string;
   isBusy: boolean;
+  isMatterSelectionRequired: boolean;
   isLoadingSelectedSession: boolean;
   latestContextUsage: TokenUsageTotals | null;
   modelLabel: string;
@@ -51,6 +52,7 @@ export function AgentComposer({
   contextUsageText,
   inputText,
   isBusy,
+  isMatterSelectionRequired,
   isLoadingSelectedSession,
   latestContextUsage,
   modelLabel,
@@ -64,7 +66,12 @@ export function AgentComposer({
   sessionTotalsRows,
   textareaRef,
 }: AgentComposerProps) {
-  const isComposerDisabled = isBusy || isLoadingSelectedSession;
+  const isComposerDisabled = isBusy || isLoadingSelectedSession || isMatterSelectionRequired;
+  const helperText = isMatterSelectionRequired
+    ? "Select a matter folder before sending a message."
+    : isBusy
+      ? "Waiting for assistant response..."
+      : "Press Enter to send, Shift+Enter for newline.";
 
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
@@ -74,7 +81,11 @@ export function AgentComposer({
           value={inputText}
           onChange={(event) => onInputTextChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Write a message..."
+          placeholder={
+            isMatterSelectionRequired
+              ? "Select a matter folder to start a chat..."
+              : "Write a message..."
+          }
           className="agent-field min-h-16 max-h-40 overflow-y-auto resize-none rounded-none border-2 shadow-none"
           disabled={isComposerDisabled}
         />
@@ -84,9 +95,7 @@ export function AgentComposer({
               <AgentComposerLoader />
             ) : (
               <>
-                <p className="text-xs text-(--ink-soft)">
-                  {isBusy ? "Waiting for assistant response..." : "Press Enter to send, Shift+Enter for newline."}
-                </p>
+                <p className="text-xs text-(--ink-soft)">{helperText}</p>
                 <p className="text-[11px] text-(--ink-soft)">Model: {modelLabel}</p>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-(--ink-muted)">
                   <Popover>

@@ -11,9 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 type CreateMatterDialogProps = {
   open: boolean;
@@ -143,7 +141,7 @@ export function CreateMatterDialog({
             New Matter Folder
           </DialogTitle>
           <DialogDescription className="text-sm text-(--ink-muted)">
-            Create a matter folder to group related chats in one workspace.
+            Create a matter folder to group related chats and documents.
           </DialogDescription>
         </DialogHeader>
 
@@ -155,17 +153,18 @@ export function CreateMatterDialog({
             >
               Matter Code
             </Label>
-            <Input
+            <input
               id="matter-code"
+              type="text"
               value={code}
               onChange={(event) => {
                 setCode(event.target.value);
                 if (codeError) setCodeError(null);
               }}
-              placeholder="LIT-2026-001"
+              placeholder="MATTER12045"
               disabled={isSubmitting}
               aria-invalid={codeError ? true : undefined}
-              className="h-10 rounded-none border-2 bg-background shadow-none"
+              className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
             />
             {codeError ? <p className="text-xs text-red-700">{codeError}</p> : null}
           </div>
@@ -177,8 +176,9 @@ export function CreateMatterDialog({
             >
               Matter Name
             </Label>
-            <Input
+            <input
               id="matter-title"
+              type="text"
               value={title}
               onChange={(event) => {
                 setTitle(event.target.value);
@@ -187,7 +187,7 @@ export function CreateMatterDialog({
               placeholder="Dispute Between X and Y"
               disabled={isSubmitting}
               aria-invalid={titleError ? true : undefined}
-              className="h-10 rounded-none border-2 bg-background shadow-none"
+              className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
             />
             {titleError ? <p className="text-xs text-red-700">{titleError}</p> : null}
           </div>
@@ -202,13 +202,13 @@ export function CreateMatterDialog({
                 Optional
               </span>
             </Label>
-            <Textarea
+            <textarea
               id="matter-description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="Brief context for this matter folder"
               disabled={isSubmitting}
-              className="min-h-24 rounded-none border-2 bg-background shadow-none"
+              className="app-field min-h-24 w-full border-2 px-3 py-2 text-sm outline-none"
             />
           </div>
 

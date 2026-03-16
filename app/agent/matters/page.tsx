@@ -1,12 +1,12 @@
 import AgentClientRuntime from "@/components/agent-shell/agent-client-runtime";
 import {
-  buildChatWorkspaceBootstrap,
+  buildMatterWorkspaceBootstrap,
   requireAuthenticatedAgentUser,
 } from "@/lib/agent/bootstrap";
 
-export default async function AgentPage() {
+export default async function AgentMattersPage() {
   const user = await requireAuthenticatedAgentUser();
-  const bootstrap = await buildChatWorkspaceBootstrap(user);
+  const bootstrap = await buildMatterWorkspaceBootstrap(user);
 
   return <AgentClientRuntime bootstrap={bootstrap} />;
 }
