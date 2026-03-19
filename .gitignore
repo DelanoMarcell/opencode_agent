@@ -15,7 +15,8 @@
 
 /Skills
 
-mcp_server/
+mcp_server/node_modules
+download/
 
 # next.js
 /.next/
