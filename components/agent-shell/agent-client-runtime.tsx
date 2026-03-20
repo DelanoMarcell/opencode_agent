@@ -88,6 +88,7 @@ import type {
   AgentBootstrapMatter,
   AgentBootstrapTrackedSession,
 } from "@/lib/agent/types";
+import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_OPENCODE_BASE_URL ?? "http://localhost:4096";
@@ -143,6 +144,36 @@ function buildChatRoute(trackedSessionID: string, matterID?: string) {
   return matterID
     ? `/agent/matters/${matterID}/chats/${trackedSessionID}`
     : `/agent/chats/${trackedSessionID}`;
+}
+
+function buildPromptFromComposerState(
+  promptText: string,
+  attachments: Array<Ms365AttachmentSelection>
+) {
+  const trimmedPrompt = promptText.trim();
+  if (attachments.length === 0) {
+    return {
+      displayPrompt: trimmedPrompt,
+      runtimePrompt: trimmedPrompt,
+    };
+  }
+
+  const promptBody =
+    trimmedPrompt || "Use the attached Microsoft 365 files as context for this request.";
+  const displayLines = attachments.map(
+    (attachment) => `- ${attachment.name} (${attachment.locationLabel})`
+  );
+  const runtimeLines = attachments.map(
+    (attachment) =>
+      `- ${attachment.name} | location=${attachment.locationLabel} | driveId=${attachment.driveId} | itemId=${attachment.id}${
+        attachment.webUrl ? ` | webUrl=${attachment.webUrl}` : ""
+      }`
+  );
+
+  return {
+    displayPrompt: `${promptBody}\n\nAttached Microsoft 365 files:\n${displayLines.join("\n")}`,
+    runtimePrompt: `${promptBody}\n\nAttached Microsoft 365 files:\n${runtimeLines.join("\n")}`,
+  };
 }
 
 function collectToolCallsFromMessageParts(
@@ -309,6 +340,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [matters, setMatters] = useState<Array<AgentBootstrapMatter>>(bootstrap.matters);
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
+  const [ms365Attachments, setMs365Attachments] = useState<Array<Ms365AttachmentSelection>>([]);
   const [traceLines, setTraceLines] = useState<Array<string>>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<Array<QuestionRequest>>([]);
@@ -2523,12 +2555,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   ]);
 
   const sendPrompt = useCallback(async () => {
-    const prompt = inputText.trim();
-    if (!prompt || isBusy || isLoadingSelectedSession) return;
+    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(
+      inputText,
+      ms365Attachments
+    );
+    if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
 
     setInputText("");
+    setMs365Attachments([]);
     setErrorText(null);
     setPendingQuestions([]);
     setPendingPermissions([]);
@@ -2537,15 +2573,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     toolStateSeenRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
 
-    appendTrace(`prompt sent (${prompt.length} chars)`);
+    appendTrace(`prompt sent (${runtimePrompt.length} chars)`);
 
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
-    appendUserCard(userMessageID, prompt, userCreatedAt, true);
+    appendUserCard(userMessageID, displayPrompt, userCreatedAt, true);
     pendingOptimisticUserRef.current = {
       localMessageID: userMessageID,
       sessionID: null,
-      text: prompt,
+      text: displayPrompt,
       createdAt: userCreatedAt,
     };
 
@@ -2586,14 +2622,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       pendingOptimisticUserRef.current = {
         localMessageID: userMessageID,
         sessionID: liveSessionID,
-        text: prompt,
+        text: displayPrompt,
         createdAt: userCreatedAt,
       };
       streamLastEventAtRef.current = Date.now();
 
       await client.session.promptAsync({
         sessionID: liveSessionID,
-        parts: [{ type: "text", text: prompt }],
+        parts: [{ type: "text", text: runtimePrompt }],
       });
 
       scheduleInteractiveRefresh(0);
@@ -2617,8 +2653,28 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     isBusy,
     isLoadingSelectedSession,
     markAssistantCardsComplete,
+    ms365Attachments,
     scheduleInteractiveRefresh,
   ]);
+
+  const handleMs365AttachmentsAdd = useCallback(
+    (files: Array<Ms365AttachmentSelection>) => {
+      setMs365Attachments((current) => {
+        const next = new Map(current.map((file) => [`${file.locationId}:${file.id}`, file]));
+        for (const file of files) {
+          next.set(`${file.locationId}:${file.id}`, file);
+        }
+        return Array.from(next.values());
+      });
+    },
+    []
+  );
+
+  const handleMs365AttachmentRemove = useCallback((key: string) => {
+    setMs365Attachments((current) =>
+      current.filter((attachment) => `${attachment.locationId}:${attachment.id}` !== key)
+    );
+  }, []);
 
   const handlePermissionReply = useCallback(
     async (requestID: string, reply: "once" | "always" | "reject") => {
@@ -2801,6 +2857,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       shouldAutoScrollRef.current = true;
       setTimeline([]);
       setInputText("");
+      setMs365Attachments([]);
       setTraceLines([]);
       setErrorText(null);
       setPendingQuestions([]);
@@ -3036,11 +3093,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             isLoadingSelectedSession={isLoadingSelectedSession}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
+            ms365Attachments={ms365Attachments}
             onInputTextChange={setInputText}
+            onMs365AttachmentsAdd={handleMs365AttachmentsAdd}
+            onMs365AttachmentRemove={handleMs365AttachmentRemove}
             onKeyDown={handleComposerKeyDown}
             onSend={() => void sendPrompt()}
             sendDisabled={
-              !inputText.trim() ||
+              (!inputText.trim() && ms365Attachments.length === 0) ||
               isBusy ||
               isLoadingSelectedSession ||
               isMatterSelectionRequired
