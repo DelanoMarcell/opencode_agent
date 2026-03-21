@@ -2,6 +2,12 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
 const userSchema = new Schema(
   {
+    organisationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organisation",
+      required: true,
+      index: true,
+    },
     email: {
       type: String,
       required: true,

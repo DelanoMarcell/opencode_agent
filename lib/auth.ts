@@ -2,6 +2,8 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
+import { ensureDefaultOrganisation, ensureUserOrganisation } from "@/lib/organisations";
+import { Organisation } from "@/lib/models/organisation";
 import { User } from "@/lib/models/user";
 
 /**
@@ -56,10 +58,22 @@ export const authOptions: NextAuthOptions = {
         const isValid = await bcrypt.compare(credentials.password, user.password);
         if (!isValid) return null;
 
+        const organisation = user.organisationId
+          ? await Organisation.findById(user.organisationId).lean()
+          : null;
+        const resolvedOrganisation = organisation ?? (await ensureDefaultOrganisation());
+
+        if (!user.organisationId) {
+          await ensureUserOrganisation(user._id);
+        }
+
         return {
           id: user._id.toString(),
           email: user.email,
           name: user.name ?? null,
+          organisationId: resolvedOrganisation._id.toString(),
+          organisationSlug: resolvedOrganisation.slug,
+          organisationName: resolvedOrganisation.name,
         };
       },
     }),
@@ -86,8 +100,11 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.email = user.email;
+        token.email = user.email ?? undefined;
         token.name = user.name;
+        token.organisationId = user.organisationId;
+        token.organisationSlug = user.organisationSlug;
+        token.organisationName = user.organisationName;
       }
       return token;
     },
@@ -105,6 +122,9 @@ export const authOptions: NextAuthOptions = {
         (session.user as { id: string }).id = token.id as string;
         session.user.email = token.email as string;
         session.user.name = token.name as string | null;
+        session.user.organisationId = token.organisationId as string;
+        session.user.organisationSlug = token.organisationSlug as string;
+        session.user.organisationName = token.organisationName as string;
       }
       return session;
     },

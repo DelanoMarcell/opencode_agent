@@ -4,11 +4,11 @@ import { MatterMember } from "@/lib/models/matter-member";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
 
-export async function resolveMatterAccess(matterId: string, userId: string) {
+export async function resolveMatterAccess(matterId: string, userId: string, organisationId: string) {
   await connectDB();
 
   const [matter, membership] = await Promise.all([
-    Matter.findById(matterId).lean(),
+    Matter.findOne({ _id: matterId, organisationId }).lean(),
     MatterMember.findOne({ matterId, userId }).lean(),
   ]);
 
@@ -26,48 +26,52 @@ export async function resolveMatterAccess(matterId: string, userId: string) {
   };
 }
 
-export async function resolveTrackedSession(trackedSessionId: string) {
+export async function resolveSessionRecord(sessionRecordId: string, organisationId: string) {
   await connectDB();
 
-  const trackedSession = await OpencodeSession.findById(trackedSessionId).lean();
-  if (!trackedSession) {
+  const sessionRecord = await OpencodeSession.findOne({
+    _id: sessionRecordId,
+    organisationId,
+  }).lean();
+  if (!sessionRecord) {
     return null;
   }
 
   const assignment = await MatterSession.findOne({
-    opencodeSessionId: trackedSession._id,
+    opencodeSessionId: sessionRecord._id,
   }).lean();
 
   return {
-    id: trackedSession._id.toString(),
-    rawSessionId: trackedSession.sessionId,
-    createdByUserId: trackedSession.createdByUserId.toString(),
-    createdAt: trackedSession.createdAt.toISOString(),
+    id: sessionRecord._id.toString(),
+    rawSessionId: sessionRecord.sessionId,
+    createdByUserId: sessionRecord.createdByUserId.toString(),
+    createdAt: sessionRecord.createdAt.toISOString(),
     matterId: assignment?.matterId?.toString(),
     addedByUserId: assignment?.addedByUserId?.toString(),
   };
 }
 
-export async function resolveMatterTrackedSession(
+export async function resolveMatterSessionRecord(
   matterId: string,
-  trackedSessionId: string,
-  userId: string
+  sessionRecordId: string,
+  userId: string,
+  organisationId: string
 ) {
-  const [matter, trackedSession] = await Promise.all([
-    resolveMatterAccess(matterId, userId),
-    resolveTrackedSession(trackedSessionId),
+  const [matter, sessionRecord] = await Promise.all([
+    resolveMatterAccess(matterId, userId, organisationId),
+    resolveSessionRecord(sessionRecordId, organisationId),
   ]);
 
-  if (!matter || !trackedSession) {
+  if (!matter || !sessionRecord) {
     return null;
   }
 
-  if (trackedSession.matterId !== matterId) {
+  if (sessionRecord.matterId !== matterId) {
     return null;
   }
 
   return {
     matter,
-    trackedSession,
+    sessionRecord,
   };
 }

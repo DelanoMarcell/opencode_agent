@@ -15,7 +15,7 @@ export type AgentBootstrapMatter = {
   status: "active" | "archived";
 };
 
-export type AgentBootstrapTrackedSession = {
+export type AgentBootstrapSessionRecord = {
   id: string;
   rawSessionId: string;
   createdByUserId: string;
@@ -28,6 +28,9 @@ export type AgentBootstrapUser = {
   id: string;
   email: string;
   name: string | null;
+  organisationId: string;
+  organisationSlug: string;
+  organisationName: string;
 };
 
 export type AgentBootstrapModelCatalog = {
@@ -50,9 +53,9 @@ export type AgentBootstrap = {
   availableSessionsLoaded: boolean;
   modelCatalog: AgentBootstrapModelCatalog;
   matterSessionIdsByMatterId: Record<string, string[]>;
-  trackedSessionsBySessionId: Record<string, AgentBootstrapTrackedSession>;
+  sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord>;
   initialSessionSnapshot?: AgentBootstrapSessionSnapshot;
   initialMatterId?: string;
-  initialTrackedSessionId?: string;
+  initialSessionRecordId?: string;
   initialRawSessionId?: string;
 };

@@ -1,37 +1,27 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
 
-function serializeTrackedSession(trackedSession: {
+function serializeSessionRecord(sessionRecord: {
   _id: { toString(): string };
   sessionId: string;
   createdByUserId: { toString(): string };
   createdAt: Date;
 }) {
   return {
-    id: trackedSession._id.toString(),
-    rawSessionId: trackedSession.sessionId,
-    createdByUserId: trackedSession.createdByUserId.toString(),
-    createdAt: trackedSession.createdAt.toISOString(),
+    id: sessionRecord._id.toString(),
+    rawSessionId: sessionRecord.sessionId,
+    createdByUserId: sessionRecord.createdByUserId.toString(),
+    createdAt: sessionRecord.createdAt.toISOString(),
   };
 }
 
-async function getAuthenticatedUser() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.id) {
-    return null;
-  }
-
-  return session.user;
-}
-
 export async function POST(req: Request) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -45,23 +35,28 @@ export async function POST(req: Request) {
 
     await connectDB();
 
-    let trackedSession = await OpencodeSession.findOne({ sessionId }).lean();
-    if (!trackedSession) {
+    const organisationObjectId = new mongoose.Types.ObjectId(user.organisationId);
+    let sessionRecord = await OpencodeSession.findOne({
+      sessionId,
+      organisationId: organisationObjectId,
+    }).lean();
+    if (!sessionRecord) {
       const created = await OpencodeSession.create({
+        organisationId: organisationObjectId,
         sessionId,
         createdByUserId: user.id,
       });
-      trackedSession = created.toObject();
+      sessionRecord = created.toObject();
     }
 
     const assignment = await MatterSession.findOne({
-      opencodeSessionId: trackedSession._id,
+      opencodeSessionId: sessionRecord._id,
     }).lean();
 
     return NextResponse.json(
       {
-        trackedSession: {
-          ...serializeTrackedSession(trackedSession),
+        sessionRecord: {
+          ...serializeSessionRecord(sessionRecord),
           matterId: assignment?.matterId?.toString(),
           addedByUserId: assignment?.addedByUserId?.toString(),
         },
@@ -69,6 +64,6 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch {
-    return NextResponse.json({ error: "Failed to register tracked session" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to register session record" }, { status: 500 });
   }
 }

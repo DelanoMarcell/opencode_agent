@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { Matter } from "@/lib/models/matter";
 import { MatterMember } from "@/lib/models/matter-member";
@@ -29,18 +29,8 @@ function serializeMatter(matter: {
   };
 }
 
-async function getAuthenticatedUser() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.id) {
-    return null;
-  }
-
-  return session.user;
-}
-
 export async function GET() {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -49,7 +39,12 @@ export async function GET() {
 
   const memberships = await MatterMember.find({ userId: user.id }).lean();
   const matterIds = memberships.map((membership) => membership.matterId.toString());
-  const matters = await Matter.find({ _id: { $in: matterIds } }).sort({ updatedAt: -1 }).lean();
+  const matters = await Matter.find({
+    _id: { $in: matterIds },
+    organisationId: new mongoose.Types.ObjectId(user.organisationId),
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
 
   return NextResponse.json({
     matters: matters.map(serializeMatter),
@@ -57,7 +52,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -75,13 +70,19 @@ export async function POST(req: Request) {
     await connectDB();
 
     const matter = await Matter.create({
+      organisationId: user.organisationId,
       code: String(code).trim(),
       title: String(title).trim(),
       description: typeof description === "string" ? description.trim() || undefined : undefined,
       ownerUserId: user.id,
     });
 
-    const users = await User.find({}, { _id: 1 }).lean();
+    const users = await User.find({
+      organisationId: user.organisationId,
+    })
+      .select({ _id: 1 })
+      .lean();
+
     await MatterMember.insertMany(
       users.map((account) => ({
         matterId: matter._id,

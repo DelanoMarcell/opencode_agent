@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/mongodb";
+import { ensureDefaultOrganisation } from "@/lib/organisations";
+import { Matter } from "@/lib/models/matter";
+import { MatterMember } from "@/lib/models/matter-member";
 import { User } from "@/lib/models/user";
 
 export async function POST(req: Request) {
@@ -32,12 +35,29 @@ export async function POST(req: Request) {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
+    const organisation = await ensureDefaultOrganisation();
 
-    await User.create({
+    const user = await User.create({
+      organisationId: organisation._id,
       email: email.toLowerCase(),
       password: hashedPassword,
       name: name?.trim() || undefined,
     });
+
+    const organisationMatters = await Matter.find(
+      { organisationId: organisation._id },
+      { _id: 1 }
+    ).lean();
+
+    if (organisationMatters.length > 0) {
+      await MatterMember.insertMany(
+        organisationMatters.map((matter) => ({
+          matterId: matter._id,
+          userId: user._id,
+        })),
+        { ordered: false }
+      );
+    }
 
     return NextResponse.json(
       { message: "Account created successfully" },

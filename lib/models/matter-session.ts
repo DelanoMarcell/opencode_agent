@@ -1,6 +1,6 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
-// Maps a tracked OpenCode session to a matter.
+// Maps an app-side session record to a matter.
 const matterSessionSchema = new Schema(
   {
     matterId: {
@@ -9,7 +9,7 @@ const matterSessionSchema = new Schema(
       required: true,
       index: true,
     },
-    // Points to the tracked session row, not directly to the raw OpenCode session id.
+    // Points to the app-side session record row, not directly to the raw OpenCode session id.
     opencodeSessionId: {
       type: Schema.Types.ObjectId,
       ref: "OpencodeSession",
@@ -49,7 +49,7 @@ Example document:
 }
 
 Meaning:
-- the tracked session is assigned to the matter
+- the session record is assigned to the matter
 - the session itself can belong to at most one matter because opencodeSessionId is unique here
 - addedByUserId records who performed the matter assignment
 */

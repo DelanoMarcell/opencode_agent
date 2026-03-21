@@ -3,10 +3,15 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 // Stores the top-level matter record that groups related OpenCode sessions.
 const matterSchema = new Schema(
   {
+    organisationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organisation",
+      required: true,
+      index: true,
+    },
     code: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       uppercase: true,
     },
@@ -35,6 +40,8 @@ const matterSchema = new Schema(
   },
   { timestamps: true }
 );
+
+matterSchema.index({ organisationId: 1, code: 1 }, { unique: true });
 
 export type IMatter = InferSchemaType<typeof matterSchema> & {
   _id: mongoose.Types.ObjectId;

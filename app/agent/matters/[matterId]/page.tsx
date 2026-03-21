@@ -15,8 +15,10 @@ type AgentMatterPageProps = {
 
 export default async function AgentMatterPage({ params }: AgentMatterPageProps) {
   const { matterId } = await params;
+  // requireAuthenticatedAgentUser() returns the signed-in user plus org context from session.
   const user = await requireAuthenticatedAgentUser();
-  const matter = await resolveMatterAccess(matterId, user.id);
+  // The matter must both exist and belong to the user's organisation.
+  const matter = await resolveMatterAccess(matterId, user.id, user.organisationId);
 
   if (!matter) {
     notFound();

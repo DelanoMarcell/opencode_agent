@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
@@ -12,18 +12,8 @@ type RouteContext = {
   }>;
 };
 
-async function getAuthenticatedUser() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.id) {
-    return null;
-  }
-
-  return session.user;
-}
-
 export async function GET(_: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -31,21 +21,24 @@ export async function GET(_: Request, { params }: RouteContext) {
   const { sessionId } = await params;
   await connectDB();
 
-  const trackedSession = await OpencodeSession.findOne({ sessionId }).lean();
-  if (!trackedSession) {
-    return NextResponse.json({ error: "Tracked session not found" }, { status: 404 });
+  const sessionRecord = await OpencodeSession.findOne({
+    sessionId,
+    organisationId: new mongoose.Types.ObjectId(user.organisationId),
+  }).lean();
+  if (!sessionRecord) {
+    return NextResponse.json({ error: "Session record not found" }, { status: 404 });
   }
 
   const assignment = await MatterSession.findOne({
-    opencodeSessionId: trackedSession._id,
+    opencodeSessionId: sessionRecord._id,
   }).lean();
 
   return NextResponse.json({
-    trackedSession: {
-      id: trackedSession._id.toString(),
-      rawSessionId: trackedSession.sessionId,
-      createdByUserId: trackedSession.createdByUserId.toString(),
-      createdAt: trackedSession.createdAt.toISOString(),
+    sessionRecord: {
+      id: sessionRecord._id.toString(),
+      rawSessionId: sessionRecord.sessionId,
+      createdByUserId: sessionRecord.createdByUserId.toString(),
+      createdAt: sessionRecord.createdAt.toISOString(),
       matterId: assignment?.matterId?.toString(),
       addedByUserId: assignment?.addedByUserId?.toString(),
     },

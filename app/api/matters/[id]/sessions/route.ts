@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
+import { Matter } from "@/lib/models/matter";
 import { MatterMember } from "@/lib/models/matter-member";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
@@ -13,37 +14,36 @@ type RouteContext = {
   }>;
 };
 
-function serializeTrackedSession(trackedSession: {
+function serializeSessionRecord(sessionRecord: {
   _id: { toString(): string };
   sessionId: string;
   createdByUserId: { toString(): string };
   createdAt: Date;
 }) {
   return {
-    id: trackedSession._id.toString(),
-    rawSessionId: trackedSession.sessionId,
-    createdByUserId: trackedSession.createdByUserId.toString(),
-    createdAt: trackedSession.createdAt.toISOString(),
+    id: sessionRecord._id.toString(),
+    rawSessionId: sessionRecord.sessionId,
+    createdByUserId: sessionRecord.createdByUserId.toString(),
+    createdAt: sessionRecord.createdAt.toISOString(),
   };
 }
 
-async function getAuthenticatedUser() {
-  const session = await getServerSession(authOptions);
+async function userCanAccessMatter(matterId: string, userId: string, organisationId: string) {
+  // A user only has access if the matter exists in their org and they have a membership row for it.
+  const [matter, membership] = await Promise.all([
+    Matter.findOne({ _id: matterId, organisationId: new mongoose.Types.ObjectId(organisationId) }).lean(),
+    MatterMember.findOne({ matterId, userId }).lean(),
+  ]);
 
-  if (!session?.user?.id) {
-    return null;
+  if (!matter) {
+    return false;
   }
 
-  return session.user;
-}
-
-async function userCanAccessMatter(matterId: string, userId: string) {
-  const membership = await MatterMember.findOne({ matterId, userId }).lean();
   return Boolean(membership);
 }
 
 export async function GET(_: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -51,29 +51,31 @@ export async function GET(_: Request, { params }: RouteContext) {
   const { id } = await params;
   await connectDB();
 
-  if (!(await userCanAccessMatter(id, user.id))) {
+  // Reject reads for matters outside the current org, even if the raw id exists.
+  if (!(await userCanAccessMatter(id, user.id, user.organisationId))) {
     return NextResponse.json({ error: "Matter not found" }, { status: 404 });
   }
 
   const assignments = await MatterSession.find({ matterId: id }).lean();
-  const trackedSessions = await OpencodeSession.find({
+  const sessionRecords = await OpencodeSession.find({
+    organisationId: new mongoose.Types.ObjectId(user.organisationId),
     _id: { $in: assignments.map((assignment) => assignment.opencodeSessionId) },
   })
     .sort({ createdAt: -1 })
     .lean();
 
-  const trackedSessionsById = Object.fromEntries(
-    trackedSessions.map((trackedSession) => [trackedSession._id.toString(), trackedSession])
+  const sessionRecordsById = Object.fromEntries(
+    sessionRecords.map((sessionRecord) => [sessionRecord._id.toString(), sessionRecord])
   );
 
   return NextResponse.json({
     sessions: assignments
       .map((assignment) => {
-        const trackedSession = trackedSessionsById[assignment.opencodeSessionId.toString()];
-        if (!trackedSession) return null;
+        const sessionRecord = sessionRecordsById[assignment.opencodeSessionId.toString()];
+        if (!sessionRecord) return null;
 
         return {
-          ...serializeTrackedSession(trackedSession),
+          ...serializeSessionRecord(sessionRecord),
           matterId: assignment.matterId.toString(),
           addedByUserId: assignment.addedByUserId.toString(),
         };
@@ -83,7 +85,7 @@ export async function GET(_: Request, { params }: RouteContext) {
 }
 
 export async function POST(req: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -91,31 +93,35 @@ export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
 
   try {
-    const { trackedSessionId } = await req.json();
+    const { sessionRecordId } = await req.json();
 
-    if (!trackedSessionId) {
-      return NextResponse.json({ error: "trackedSessionId is required" }, { status: 400 });
+    if (!sessionRecordId) {
+      return NextResponse.json({ error: "sessionRecordId is required" }, { status: 400 });
     }
 
     await connectDB();
 
-    if (!(await userCanAccessMatter(id, user.id))) {
+    // Reject assignments into matters outside the current org, even if the raw id exists.
+    if (!(await userCanAccessMatter(id, user.id, user.organisationId))) {
       return NextResponse.json({ error: "Matter not found" }, { status: 404 });
     }
 
-    const trackedSession = await OpencodeSession.findById(trackedSessionId).lean();
-    if (!trackedSession) {
-      return NextResponse.json({ error: "Tracked session not found" }, { status: 404 });
+    const sessionRecord = await OpencodeSession.findOne({
+      _id: sessionRecordId,
+      organisationId: new mongoose.Types.ObjectId(user.organisationId),
+    }).lean();
+    if (!sessionRecord) {
+      return NextResponse.json({ error: "Session record not found" }, { status: 404 });
     }
 
     const existingAssignment = await MatterSession.findOne({
-      opencodeSessionId: trackedSessionId,
+      opencodeSessionId: sessionRecordId,
     }).lean();
 
     if (existingAssignment) {
       if (existingAssignment.matterId.toString() !== id) {
         return NextResponse.json(
-          { error: "Tracked session is already assigned to another matter" },
+          { error: "Session record is already assigned to another matter" },
           { status: 409 }
         );
       }
@@ -134,7 +140,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const matterSession = await MatterSession.create({
       matterId: id,
-      opencodeSessionId: trackedSessionId,
+      opencodeSessionId: sessionRecordId,
       addedByUserId: user.id,
     });
 
@@ -152,6 +158,6 @@ export async function POST(req: Request, { params }: RouteContext) {
       { status: 201 }
     );
   } catch {
-    return NextResponse.json({ error: "Failed to assign session to matter" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to assign session record to matter" }, { status: 500 });
   }
 }

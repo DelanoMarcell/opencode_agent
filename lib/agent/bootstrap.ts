@@ -1,7 +1,7 @@
-import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { Matter } from "@/lib/models/matter";
 import { MatterMember } from "@/lib/models/matter-member";
@@ -11,35 +11,31 @@ import { fetchOpenCodeBootstrap } from "@/lib/agent/opencode-server";
 import type {
   AgentBootstrap,
   AgentBootstrapMatter,
-  AgentBootstrapTrackedSession,
+  AgentBootstrapSessionRecord,
   AgentBootstrapUser,
   AgentWorkspaceMode,
 } from "@/lib/agent/types";
 
 type BuildWorkspaceBootstrapOptions = {
   initialMatterId?: string;
-  initialTrackedSessionId?: string;
+  initialSessionRecordId?: string;
   initialRawSessionId?: string;
 };
 
 type LoadedAgentWorkspaceData = {
   matters: Array<AgentBootstrapMatter>;
   matterSessionIdsByMatterId: Record<string, string[]>;
-  trackedSessionsBySessionId: Record<string, AgentBootstrapTrackedSession>;
+  sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord>;
 };
 
 export async function requireAuthenticatedAgentUser(): Promise<AgentBootstrapUser> {
-  const session = await getServerSession(authOptions);
+  const user = await getAuthenticatedOrganisationUser();
 
-  if (!session?.user?.id || !session.user.email) {
+  if (!user) {
     redirect("/auth/sign-in");
   }
 
-  return {
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name ?? null,
-  };
+  return user;
 }
 
 async function loadAccessibleAgentWorkspaceData(
@@ -47,13 +43,19 @@ async function loadAccessibleAgentWorkspaceData(
 ): Promise<LoadedAgentWorkspaceData> {
   await connectDB();
 
+  const organisationObjectId = new mongoose.Types.ObjectId(user.organisationId);
   const memberships = await MatterMember.find({ userId: user.id }).lean();
   const accessibleMatterIds = memberships.map((membership) => membership.matterId.toString());
 
-  const [matterDocs, trackedSessionDocs, matterSessionDocs] = await Promise.all([
-    Matter.find({ _id: { $in: accessibleMatterIds } }).sort({ updatedAt: -1 }).lean(),
-    OpencodeSession.find({}).sort({ createdAt: -1 }).lean(),
-    MatterSession.find({}).lean(),
+  const [matterDocs, sessionRecordDocs, matterSessionDocs] = await Promise.all([
+    Matter.find({
+      _id: { $in: accessibleMatterIds },
+      organisationId: organisationObjectId,
+    })
+      .sort({ updatedAt: -1 })
+      .lean(),
+    OpencodeSession.find({ organisationId: organisationObjectId }).sort({ createdAt: -1 }).lean(),
+    MatterSession.find({ matterId: { $in: accessibleMatterIds } }).lean(),
   ]);
 
   const accessibleMatterIdSet = new Set(accessibleMatterIds);
@@ -67,16 +69,16 @@ async function loadAccessibleAgentWorkspaceData(
     status: matter.status,
   }));
 
-  const assignmentByTrackedSessionId = new Map<string, (typeof matterSessionDocs)[number]>(
+  const assignmentBySessionRecordId = new Map<string, (typeof matterSessionDocs)[number]>(
     matterSessionDocs.map((assignment) => [assignment.opencodeSessionId.toString(), assignment])
   );
 
-  const trackedSessionsBySessionId: Record<string, AgentBootstrapTrackedSession> = {};
+  const sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord> = {};
   const matterSessionIdsByMatterId: Record<string, string[]> = {};
 
-  for (const trackedSession of trackedSessionDocs) {
-    const trackedSessionId = trackedSession._id.toString();
-    const assignment = assignmentByTrackedSessionId.get(trackedSessionId);
+  for (const sessionRecord of sessionRecordDocs) {
+    const sessionRecordId = sessionRecord._id.toString();
+    const assignment = assignmentBySessionRecordId.get(sessionRecordId);
 
     if (assignment) {
       const assignmentMatterId = assignment.matterId.toString();
@@ -85,14 +87,14 @@ async function loadAccessibleAgentWorkspaceData(
       }
 
       matterSessionIdsByMatterId[assignmentMatterId] ??= [];
-      matterSessionIdsByMatterId[assignmentMatterId].push(trackedSession.sessionId);
+      matterSessionIdsByMatterId[assignmentMatterId].push(sessionRecord.sessionId);
     }
 
-    trackedSessionsBySessionId[trackedSession.sessionId] = {
-      id: trackedSessionId,
-      rawSessionId: trackedSession.sessionId,
-      createdByUserId: trackedSession.createdByUserId.toString(),
-      createdAt: trackedSession.createdAt.toISOString(),
+    sessionRecordsByRawSessionId[sessionRecord.sessionId] = {
+      id: sessionRecordId,
+      rawSessionId: sessionRecord.sessionId,
+      createdByUserId: sessionRecord.createdByUserId.toString(),
+      createdAt: sessionRecord.createdAt.toISOString(),
       matterId: assignment?.matterId?.toString(),
       addedByUserId: assignment?.addedByUserId?.toString(),
     };
@@ -101,35 +103,35 @@ async function loadAccessibleAgentWorkspaceData(
   return {
     matters,
     matterSessionIdsByMatterId,
-    trackedSessionsBySessionId,
+    sessionRecordsByRawSessionId,
   };
 }
 
 function buildChatsWorkspaceData(
   data: LoadedAgentWorkspaceData
 ): LoadedAgentWorkspaceData {
-  const trackedSessionsBySessionId = Object.fromEntries(
-    Object.entries(data.trackedSessionsBySessionId).filter(([, trackedSession]) => !trackedSession.matterId)
+  const sessionRecordsByRawSessionId = Object.fromEntries(
+    Object.entries(data.sessionRecordsByRawSessionId).filter(([, sessionRecord]) => !sessionRecord.matterId)
   );
 
   return {
     matters: [],
     matterSessionIdsByMatterId: {},
-    trackedSessionsBySessionId,
+    sessionRecordsByRawSessionId,
   };
 }
 
 function buildMattersWorkspaceData(
   data: LoadedAgentWorkspaceData
 ): LoadedAgentWorkspaceData {
-  const trackedSessionsBySessionId = Object.fromEntries(
-    Object.entries(data.trackedSessionsBySessionId).filter(([, trackedSession]) => Boolean(trackedSession.matterId))
+  const sessionRecordsByRawSessionId = Object.fromEntries(
+    Object.entries(data.sessionRecordsByRawSessionId).filter(([, sessionRecord]) => Boolean(sessionRecord.matterId))
   );
 
   return {
     matters: data.matters,
     matterSessionIdsByMatterId: data.matterSessionIdsByMatterId,
-    trackedSessionsBySessionId,
+    sessionRecordsByRawSessionId,
   };
 }
 
@@ -145,7 +147,7 @@ async function buildWorkspaceBootstrap(
 
   const openCodeBootstrap = await fetchOpenCodeBootstrap({
     initialRawSessionId: options.initialRawSessionId,
-    visibleRawSessionIds: new Set(Object.keys(workspaceData.trackedSessionsBySessionId)),
+    visibleRawSessionIds: new Set(Object.keys(workspaceData.sessionRecordsByRawSessionId)),
   });
 
   return {
@@ -156,10 +158,10 @@ async function buildWorkspaceBootstrap(
     availableSessionsLoaded: openCodeBootstrap.availableSessionsLoaded,
     modelCatalog: openCodeBootstrap.modelCatalog,
     matterSessionIdsByMatterId: workspaceData.matterSessionIdsByMatterId,
-    trackedSessionsBySessionId: workspaceData.trackedSessionsBySessionId,
+    sessionRecordsByRawSessionId: workspaceData.sessionRecordsByRawSessionId,
     initialSessionSnapshot: openCodeBootstrap.initialSessionSnapshot,
     initialMatterId: options.initialMatterId,
-    initialTrackedSessionId: options.initialTrackedSessionId,
+    initialSessionRecordId: options.initialSessionRecordId,
     initialRawSessionId: options.initialRawSessionId,
   };
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { Matter } from "@/lib/models/matter";
 import { MatterMember } from "@/lib/models/matter-member";
@@ -34,23 +34,22 @@ function serializeMatter(matter: {
   };
 }
 
-async function getAuthenticatedUser() {
-  const session = await getServerSession(authOptions);
+async function userCanAccessMatter(matterId: string, userId: string, organisationId: string) {
+  // A user only has access if the matter exists in their org and they have a membership row for it.
+  const [matter, membership] = await Promise.all([
+    Matter.findOne({ _id: matterId, organisationId: new mongoose.Types.ObjectId(organisationId) }).lean(),
+    MatterMember.findOne({ matterId, userId }).lean(),
+  ]);
 
-  if (!session?.user?.id) {
-    return null;
+  if (!matter) {
+    return false;
   }
 
-  return session.user;
-}
-
-async function userCanAccessMatter(matterId: string, userId: string) {
-  const membership = await MatterMember.findOne({ matterId, userId }).lean();
   return Boolean(membership);
 }
 
 export async function PATCH(req: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedOrganisationUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -74,12 +73,13 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     await connectDB();
 
-    if (!(await userCanAccessMatter(id, user.id))) {
+    // Reject updates to matters outside the current org, even if the raw id exists.
+    if (!(await userCanAccessMatter(id, user.id, user.organisationId))) {
       return NextResponse.json({ error: "Matter not found" }, { status: 404 });
     }
 
-    const matter = await Matter.findByIdAndUpdate(
-      id,
+    const matter = await Matter.findOneAndUpdate(
+      { _id: id, organisationId: new mongoose.Types.ObjectId(user.organisationId) },
       {
         code: trimmedCode.toUpperCase(),
         title: trimmedTitle,

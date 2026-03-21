@@ -86,7 +86,7 @@ import type {
 import type {
   AgentBootstrap,
   AgentBootstrapMatter,
-  AgentBootstrapTrackedSession,
+  AgentBootstrapSessionRecord,
 } from "@/lib/agent/types";
 import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
@@ -140,10 +140,10 @@ type AgentClientRuntimeProps = {
   bootstrap: AgentBootstrap;
 };
 
-function buildChatRoute(trackedSessionID: string, matterID?: string) {
+function buildChatRoute(sessionRecordID: string, matterID?: string) {
   return matterID
-    ? `/agent/matters/${matterID}/chats/${trackedSessionID}`
-    : `/agent/chats/${trackedSessionID}`;
+    ? `/agent/matters/${matterID}/chats/${sessionRecordID}`
+    : `/agent/chats/${sessionRecordID}`;
 }
 
 function buildPromptFromComposerState(
@@ -321,8 +321,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     bootstrap.availableSessions
   );
   const [selectedSessionID, setSelectedSessionID] = useState(bootstrap.initialRawSessionId ?? "");
-  const [selectedTrackedSessionID, setSelectedTrackedSessionID] = useState(
-    bootstrap.initialTrackedSessionId ?? ""
+  const [selectedSessionRecordID, setSelectedSessionRecordID] = useState(
+    bootstrap.initialSessionRecordId ?? ""
   );
   const [selectedMatterID, setSelectedMatterID] = useState(bootstrap.initialMatterId ?? "");
   const [isLoadingSessionOptions, setIsLoadingSessionOptions] = useState(
@@ -334,9 +334,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [matterSessionIdsByMatterId, setMatterSessionIdsByMatterId] = useState<
     Record<string, string[]>
   >(bootstrap.matterSessionIdsByMatterId);
-  const [trackedSessionsBySessionId, setTrackedSessionsBySessionId] = useState<
-    Record<string, AgentBootstrapTrackedSession>
-  >(bootstrap.trackedSessionsBySessionId);
+  const [sessionRecordsByRawSessionId, setSessionRecordsByRawSessionId] = useState<
+    Record<string, AgentBootstrapSessionRecord>
+  >(bootstrap.sessionRecordsByRawSessionId);
   const [matters, setMatters] = useState<Array<AgentBootstrapMatter>>(bootstrap.matters);
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
@@ -423,8 +423,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const shouldAutoScrollRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const pendingOptimisticUserRef = useRef<PendingOptimisticUserMessage | null>(null);
-  const trackedSessionWriteInFlightRef = useRef<
-    Map<string, Promise<AgentBootstrapTrackedSession>>
+  const sessionRecordWriteInFlightRef = useRef<
+    Map<string, Promise<AgentBootstrapSessionRecord>>
   >(new Map());
   const resumeRequestIDRef = useRef(0);
   const sessionOptionsRequestIDRef = useRef(0);
@@ -463,15 +463,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     };
   }, [pathname]);
 
-  const trackedSessions = useMemo<Array<AgentBootstrapTrackedSession>>(
-    () => Object.values(trackedSessionsBySessionId),
-    [trackedSessionsBySessionId]
+  const sessionRecords = useMemo<Array<AgentBootstrapSessionRecord>>(
+    () => Object.values(sessionRecordsByRawSessionId),
+    [sessionRecordsByRawSessionId]
   );
 
-  const trackedSessionsByTrackedID = useMemo<Record<string, AgentBootstrapTrackedSession>>(
+  const sessionRecordsById = useMemo<Record<string, AgentBootstrapSessionRecord>>(
     () =>
-      Object.fromEntries(trackedSessions.map((trackedSession) => [trackedSession.id, trackedSession])),
-    [trackedSessions]
+      Object.fromEntries(sessionRecords.map((sessionRecord) => [sessionRecord.id, sessionRecord])),
+    [sessionRecords]
   );
   const routeSyncKey = useMemo(
     () =>
@@ -479,13 +479,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         pathname,
         bootstrap.workspaceMode,
         bootstrap.initialMatterId ?? "",
-        bootstrap.initialTrackedSessionId ?? "",
+        bootstrap.initialSessionRecordId ?? "",
         bootstrap.initialRawSessionId ?? "",
       ].join("|"),
     [
       bootstrap.initialMatterId,
       bootstrap.initialRawSessionId,
-      bootstrap.initialTrackedSessionId,
+      bootstrap.initialSessionRecordId,
       bootstrap.workspaceMode,
       pathname,
     ]
@@ -2026,7 +2026,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       const sorted = [...(sessionsResult.data ?? [])]
         .sort((left, right) => right.time.updated - left.time.updated)
-        .filter((session) => session.id in trackedSessionsBySessionId)
+        .filter((session) => session.id in sessionRecordsByRawSessionId)
         .map((session) => ({
           id: session.id,
           title: session.title,
@@ -2053,42 +2053,42 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         setIsLoadingSessionOptions(false);
       }
     }
-  }, [bootstrap.initialRawSessionId, ensureClients, refreshModelContextLimits, trackedSessionsBySessionId]);
+  }, [bootstrap.initialRawSessionId, ensureClients, refreshModelContextLimits, sessionRecordsByRawSessionId]);
 
-  const syncTrackedSession = useCallback((trackedSession: AgentBootstrapTrackedSession) => {
-    setTrackedSessionsBySessionId((previous) => ({
+  const syncSessionRecord = useCallback((sessionRecord: AgentBootstrapSessionRecord) => {
+    setSessionRecordsByRawSessionId((previous) => ({
       ...previous,
-      [trackedSession.rawSessionId]: trackedSession,
+      [sessionRecord.rawSessionId]: sessionRecord,
     }));
 
     setMatterSessionIdsByMatterId((previous) => {
       const next = Object.fromEntries(
         Object.entries(previous).map(([matterID, sessionIDs]) => [
           matterID,
-          sessionIDs.filter((sessionID) => sessionID !== trackedSession.rawSessionId),
+          sessionIDs.filter((sessionID) => sessionID !== sessionRecord.rawSessionId),
         ])
       );
 
-      if (trackedSession.matterId) {
-        const current = next[trackedSession.matterId] ?? [];
-        next[trackedSession.matterId] = current.includes(trackedSession.rawSessionId)
+      if (sessionRecord.matterId) {
+        const current = next[sessionRecord.matterId] ?? [];
+        next[sessionRecord.matterId] = current.includes(sessionRecord.rawSessionId)
           ? current
-          : [...current, trackedSession.rawSessionId];
+          : [...current, sessionRecord.rawSessionId];
       }
 
       return next;
     });
   }, []);
 
-  const assignTrackedSessionToMatter = useCallback(
-    async (trackedSession: AgentBootstrapTrackedSession, matterID: string) => {
+  const assignSessionRecordToMatter = useCallback(
+    async (sessionRecord: AgentBootstrapSessionRecord, matterID: string) => {
       const response = await fetch(`/api/matters/${matterID}/sessions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          trackedSessionId: trackedSession.id,
+          sessionRecordId: sessionRecord.id,
         }),
       });
 
@@ -2100,35 +2100,35 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         throw new Error(payload?.error ?? "Failed to assign session to matter");
       }
 
-      const nextTrackedSession: AgentBootstrapTrackedSession = {
-        ...trackedSession,
+      const nextSessionRecord: AgentBootstrapSessionRecord = {
+        ...sessionRecord,
         matterId: matterID,
         addedByUserId: payload?.addedByUserId,
       };
 
-      syncTrackedSession(nextTrackedSession);
-      return nextTrackedSession;
+      syncSessionRecord(nextSessionRecord);
+      return nextSessionRecord;
     },
-    [syncTrackedSession]
+    [syncSessionRecord]
   );
 
-  const registerTrackedSession = useCallback(
+  const registerSessionRecord = useCallback(
     async (rawSessionID: string, matterID?: string) => {
-      const existingTrackedSession = trackedSessionsBySessionId[rawSessionID];
-      if (existingTrackedSession) {
-        if (matterID && existingTrackedSession.matterId !== matterID) {
-          return assignTrackedSessionToMatter(existingTrackedSession, matterID);
+      const existingSessionRecord = sessionRecordsByRawSessionId[rawSessionID];
+      if (existingSessionRecord) {
+        if (matterID && existingSessionRecord.matterId !== matterID) {
+          return assignSessionRecordToMatter(existingSessionRecord, matterID);
         }
-        return existingTrackedSession;
+        return existingSessionRecord;
       }
 
-      const inflight = trackedSessionWriteInFlightRef.current.get(rawSessionID);
+      const inflight = sessionRecordWriteInFlightRef.current.get(rawSessionID);
       if (inflight) {
-        const trackedSession = await inflight;
-        if (matterID && trackedSession.matterId !== matterID) {
-          return assignTrackedSessionToMatter(trackedSession, matterID);
+        const sessionRecord = await inflight;
+        if (matterID && sessionRecord.matterId !== matterID) {
+          return assignSessionRecordToMatter(sessionRecord, matterID);
         }
-        return trackedSession;
+        return sessionRecord;
       }
 
       const request = (async () => {
@@ -2143,35 +2143,35 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         });
 
         const payload = (await response.json().catch(() => null)) as
-          | { error?: string; trackedSession?: AgentBootstrapTrackedSession }
+          | { error?: string; sessionRecord?: AgentBootstrapSessionRecord }
           | null;
 
-        if (!response.ok || !payload?.trackedSession) {
-          throw new Error(payload?.error ?? "Failed to register tracked session");
+        if (!response.ok || !payload?.sessionRecord) {
+          throw new Error(payload?.error ?? "Failed to register session record");
         }
 
-        let trackedSession = payload.trackedSession;
-        syncTrackedSession(trackedSession);
+        let sessionRecord = payload.sessionRecord;
+        syncSessionRecord(sessionRecord);
 
-        if (matterID && trackedSession.matterId !== matterID) {
-          trackedSession = await assignTrackedSessionToMatter(trackedSession, matterID);
+        if (matterID && sessionRecord.matterId !== matterID) {
+          sessionRecord = await assignSessionRecordToMatter(sessionRecord, matterID);
         }
 
-        return trackedSession;
+        return sessionRecord;
       })();
 
-      trackedSessionWriteInFlightRef.current.set(rawSessionID, request);
+      sessionRecordWriteInFlightRef.current.set(rawSessionID, request);
 
       try {
         return await request;
       } finally {
-        trackedSessionWriteInFlightRef.current.delete(rawSessionID);
+        sessionRecordWriteInFlightRef.current.delete(rawSessionID);
       }
     },
     [
-      assignTrackedSessionToMatter,
-      syncTrackedSession,
-      trackedSessionsBySessionId,
+      assignSessionRecordToMatter,
+      syncSessionRecord,
+      sessionRecordsByRawSessionId,
     ]
   );
 
@@ -2337,24 +2337,24 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [router]
   );
 
-  const handleSelectTrackedSession = useCallback(
-    (trackedSessionID: string) => {
-      const trackedSession = trackedSessionsByTrackedID[trackedSessionID];
-      if (!trackedSession) return;
+  const handleSelectSessionRecord = useCallback(
+    (sessionRecordID: string) => {
+      const sessionRecord = sessionRecordsById[sessionRecordID];
+      if (!sessionRecord) return;
 
-      setSelectedTrackedSessionID(trackedSessionID);
-      setSelectedMatterID(trackedSession.matterId ?? "");
-      setSelectedSessionID(trackedSession.rawSessionId);
-      router.push(buildChatRoute(trackedSessionID, trackedSession.matterId));
+      setSelectedSessionRecordID(sessionRecordID);
+      setSelectedMatterID(sessionRecord.matterId ?? "");
+      setSelectedSessionID(sessionRecord.rawSessionId);
+      router.push(buildChatRoute(sessionRecordID, sessionRecord.matterId));
     },
-    [router, trackedSessionsByTrackedID]
+    [router, sessionRecordsById]
   );
 
   const handleMatterCreated = useCallback(
     (matterID: string) => {
       setErrorText(null);
       setSelectedMatterID(matterID);
-      setSelectedTrackedSessionID("");
+      setSelectedSessionRecordID("");
       setSelectedSessionID("");
       router.push(`/agent/matters/${matterID}`);
     },
@@ -2396,10 +2396,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     lastRouteSyncKeyRef.current = routeSyncKey;
 
     setSelectedMatterID(bootstrap.initialMatterId ?? "");
-    setSelectedTrackedSessionID(bootstrap.initialTrackedSessionId ?? "");
+    setSelectedSessionRecordID(bootstrap.initialSessionRecordId ?? "");
     setSelectedSessionID(bootstrap.initialRawSessionId ?? "");
     setMatters(bootstrap.matters);
-    setTrackedSessionsBySessionId(bootstrap.trackedSessionsBySessionId);
+    setSessionRecordsByRawSessionId(bootstrap.sessionRecordsByRawSessionId);
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
@@ -2532,13 +2532,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     }
 
     const createdSession = sessionResult.data;
-    const trackedSession = await registerTrackedSession(createdSession.id, selectedMatterID || undefined);
+    const sessionRecord = await registerSessionRecord(createdSession.id, selectedMatterID || undefined);
     resetSessionTokenTracking();
     sessionIDRef.current = createdSession.id;
     setSessionID(createdSession.id);
     setSelectedSessionID(createdSession.id);
-    setSelectedTrackedSessionID(trackedSession.id);
-    setSelectedMatterID(trackedSession.matterId ?? selectedMatterID);
+    setSelectedSessionRecordID(sessionRecord.id);
+    setSelectedMatterID(sessionRecord.matterId ?? selectedMatterID);
     appendTrace(`session created: ${createdSession.id}`);
     void loadSessionOptions();
 
@@ -2548,7 +2548,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     ensureClients,
     ensureEventStream,
     loadSessionOptions,
-    registerTrackedSession,
+    registerSessionRecord,
     refreshModelContextLimits,
     resetSessionTokenTracking,
     selectedMatterID,
@@ -2853,7 +2853,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       setSessionID(null);
       setSelectedSessionID("");
-      setSelectedTrackedSessionID("");
+      setSelectedSessionRecordID("");
       shouldAutoScrollRef.current = true;
       setTimeline([]);
       setInputText("");
@@ -2958,16 +2958,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const shouldShowRouteChatLoader =
     isLoadingSelectedSession && Boolean(bootstrap.initialRawSessionId);
   const sidebarSessions: Array<MatterChatSidebarSession> = availableSessions.flatMap((session) => {
-    const trackedSession = trackedSessionsBySessionId[session.id];
-    if (!trackedSession) return [];
+    const sessionRecord = sessionRecordsByRawSessionId[session.id];
+    if (!sessionRecord) return [];
 
     return [
       {
-        trackedSessionId: trackedSession.id,
+        sessionRecordId: sessionRecord.id,
         rawSessionId: session.id,
         title: session.title?.trim() ? session.title.trim() : "Untitled",
         updatedLabel: new Date(session.updated || session.created).toLocaleDateString(),
-        shortID: trackedSession.id.slice(0, 8),
+        shortID: sessionRecord.id.slice(0, 8),
       },
     ];
   });
@@ -2976,7 +2976,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const recentChats =
     workspaceMode === "chats"
       ? sidebarSessions.filter(
-          (session) => !trackedSessionsByTrackedID[session.trackedSessionId]?.matterId
+          (session) => !sessionRecordsById[session.sessionRecordId]?.matterId
         )
       : [];
   const matterFolders: Array<MatterChatSidebarMatter> =
@@ -3030,7 +3030,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           matters={matterFolders}
           recentChats={recentChats}
           selectedMatterID={selectedMatterID}
-          selectedTrackedSessionID={selectedTrackedSessionID}
+          selectedSessionRecordID={selectedSessionRecordID}
           userEmail={bootstrap.user.email}
           workspaceMode={workspaceMode}
           onCreateChat={handleCreateChat}
@@ -3039,7 +3039,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           onOpenChatsWorkspace={handleOpenChatsWorkspace}
           onOpenMattersWorkspace={handleOpenMattersWorkspace}
           onSelectMatter={handleSelectMatter}
-          onSelectSession={handleSelectTrackedSession}
+          onSelectSession={handleSelectSessionRecord}
         />
 
         <Card className="agent-panel min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">

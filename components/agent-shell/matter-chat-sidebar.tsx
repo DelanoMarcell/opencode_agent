@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/sheet";
 
 export type MatterChatSidebarSession = {
-  trackedSessionId: string;
+  sessionRecordId: string;
   rawSessionId: string;
   title: string;
   updatedLabel: string;
@@ -61,13 +61,13 @@ export type MatterChatSidebarMatter = {
 function buildExpandedMattersState(
   matters: Array<MatterChatSidebarMatter>,
   selectedMatterID: string,
-  selectedTrackedSessionID: string,
+  selectedSessionRecordID: string,
   current: Record<string, boolean> = {}
 ): Record<string, boolean> {
   const next = { ...current };
-  const activeMatterForSelectedChat = selectedTrackedSessionID
+  const activeMatterForSelectedChat = selectedSessionRecordID
     ? matters.find((matter) =>
-        matter.chats.some((chat) => chat.trackedSessionId === selectedTrackedSessionID)
+        matter.chats.some((chat) => chat.sessionRecordId === selectedSessionRecordID)
       )?.id
     : undefined;
 
@@ -96,7 +96,7 @@ type MatterChatSidebarProps = {
   matters: Array<MatterChatSidebarMatter>;
   recentChats: Array<MatterChatSidebarSession>;
   selectedMatterID: string;
-  selectedTrackedSessionID: string;
+  selectedSessionRecordID: string;
   userEmail: string;
   workspaceMode: WorkspaceMode;
   onCreateChat: () => void;
@@ -105,7 +105,7 @@ type MatterChatSidebarProps = {
   onOpenChatsWorkspace: () => void;
   onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
-  onSelectSession: (trackedSessionID: string) => void;
+  onSelectSession: (sessionRecordID: string) => void;
 };
 
 type RowActionMenuProps = {
@@ -183,7 +183,7 @@ function RowActionMenu({ kind, title, onEditMatter }: RowActionMenuProps) {
 
 type SidebarBodyProps = {
   activeMatterID: string;
-  activeTrackedSessionID: string;
+  activeSessionRecordID: string;
   canCreateChat: boolean;
   expandedMatters: Record<string, boolean>;
   isLoadingRecentChats: boolean;
@@ -196,14 +196,14 @@ type SidebarBodyProps = {
   onOpenChatsWorkspace: () => void;
   onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
-  onSelectSession: (trackedSessionID: string) => void;
+  onSelectSession: (sessionRecordID: string) => void;
   onEditMatter: (matterID: string) => void;
   onToggleMatter: (matterID: string) => void;
 };
 
 function SidebarBody({
   activeMatterID,
-  activeTrackedSessionID,
+  activeSessionRecordID,
   canCreateChat,
   expandedMatters,
   isLoadingRecentChats,
@@ -221,7 +221,7 @@ function SidebarBody({
   onToggleMatter,
 }: SidebarBodyProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const activeSidebarItemID = activeTrackedSessionID || activeMatterID;
+  const activeSidebarItemID = activeSessionRecordID || activeMatterID;
 
   useEffect(() => {
     if (!activeSidebarItemID) return;
@@ -330,10 +330,10 @@ function SidebarBody({
                 <RecentChatsLoader />
               ) : recentChats.length > 0 ? (
                 recentChats.map((chat) => {
-                  const active = activeTrackedSessionID === chat.trackedSessionId;
+                  const active = activeSessionRecordID === chat.sessionRecordId;
                   return (
                     <div
-                      key={chat.trackedSessionId}
+                      key={chat.sessionRecordId}
                       data-active-sidebar-item={active ? "true" : undefined}
                       data-active-sidebar-session={active ? "true" : undefined}
                       className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors ${
@@ -344,7 +344,7 @@ function SidebarBody({
                     >
                       <button
                         type="button"
-                        onClick={() => onSelectSession(chat.trackedSessionId)}
+                        onClick={() => onSelectSession(chat.sessionRecordId)}
                         className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                       >
                         <MessageSquareText className="size-4 shrink-0 text-(--ink-soft)" />
@@ -469,10 +469,10 @@ function SidebarBody({
                       {isExpanded && matter.chats.length > 0 ? (
                         <div className="ml-6 mt-1 min-w-0 space-y-1 border-l-2 border-(--border) pl-4">
                           {matter.chats.map((chat) => {
-                            const active = activeTrackedSessionID === chat.trackedSessionId;
+                            const active = activeSessionRecordID === chat.sessionRecordId;
                             return (
                               <div
-                                key={chat.trackedSessionId}
+                                key={chat.sessionRecordId}
                                 data-active-sidebar-item={active ? "true" : undefined}
                                 data-active-sidebar-session={active ? "true" : undefined}
                                 className={`group relative flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-2 px-2 py-2 transition-colors before:absolute before:-left-4 before:top-1/2 before:h-px before:w-3 before:-translate-y-1/2 before:bg-(--border) ${
@@ -483,7 +483,7 @@ function SidebarBody({
                               >
                                 <button
                                   type="button"
-                                  onClick={() => onSelectSession(chat.trackedSessionId)}
+                                  onClick={() => onSelectSession(chat.sessionRecordId)}
                                   className="flex w-full min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden text-left"
                                 >
                                   <MessageSquareText className="size-4 shrink-0 text-(--ink-muted)" />
@@ -575,7 +575,7 @@ export function MatterChatSidebar({
   matters,
   recentChats,
   selectedMatterID,
-  selectedTrackedSessionID,
+  selectedSessionRecordID,
   userEmail,
   workspaceMode,
   onCreateChat,
@@ -591,7 +591,7 @@ export function MatterChatSidebar({
   const [isEditMatterOpen, setIsEditMatterOpen] = useState(false);
   const [editingMatterID, setEditingMatterID] = useState<string | null>(null);
   const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>(() =>
-    buildExpandedMattersState(matters, selectedMatterID, selectedTrackedSessionID)
+    buildExpandedMattersState(matters, selectedMatterID, selectedSessionRecordID)
   );
   const editingMatter = editingMatterID
     ? (matters.find((matter) => matter.id === editingMatterID) ?? null)
@@ -599,17 +599,17 @@ export function MatterChatSidebar({
 
   useLayoutEffect(() => {
     setExpandedMatters((current) =>
-      buildExpandedMattersState(matters, selectedMatterID, selectedTrackedSessionID, current)
+      buildExpandedMattersState(matters, selectedMatterID, selectedSessionRecordID, current)
     );
-  }, [matters, selectedMatterID, selectedTrackedSessionID]);
+  }, [matters, selectedMatterID, selectedSessionRecordID]);
 
   const handleSelectMatter = (matterID: string) => {
     onSelectMatter(matterID);
     setIsMobileOpen(false);
   };
 
-  const handleSelectSession = (trackedSessionID: string) => {
-    onSelectSession(trackedSessionID);
+  const handleSelectSession = (sessionRecordID: string) => {
+    onSelectSession(sessionRecordID);
     setIsMobileOpen(false);
   };
 
@@ -660,7 +660,7 @@ export function MatterChatSidebar({
       <aside className="agent-panel hidden h-full min-h-0 w-[320px] min-w-0 overflow-hidden border-2 bg-background lg:flex">
         <SidebarBody
           activeMatterID={selectedMatterID}
-          activeTrackedSessionID={selectedTrackedSessionID}
+          activeSessionRecordID={selectedSessionRecordID}
           canCreateChat={canCreateChat}
           expandedMatters={expandedMatters}
           isLoadingRecentChats={isLoadingRecentChats}
@@ -693,7 +693,7 @@ export function MatterChatSidebar({
           </SheetHeader>
           <SidebarBody
             activeMatterID={selectedMatterID}
-            activeTrackedSessionID={selectedTrackedSessionID}
+            activeSessionRecordID={selectedSessionRecordID}
             canCreateChat={canCreateChat}
             expandedMatters={expandedMatters}
             isLoadingRecentChats={isLoadingRecentChats}

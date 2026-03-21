@@ -3,6 +3,12 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 // Stores app-side metadata for each OpenCode session, including who created it.
 const opencodeSessionSchema = new Schema(
   {
+    organisationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organisation",
+      required: true,
+      index: true,
+    },
     sessionId: {
       type: String,
       required: true,
@@ -38,7 +44,7 @@ Example document:
 }
 
 Meaning:
-- this is one tracked OpenCode session
+- this is one app-side session record for an OpenCode session
 - the actual conversation content still lives in OpenCode
 - the app uses this row to know who created the session, even if it is never assigned to a matter
 */
