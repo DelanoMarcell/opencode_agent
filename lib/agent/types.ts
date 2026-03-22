@@ -18,6 +18,7 @@ export type AgentBootstrapMatter = {
 export type AgentBootstrapSessionRecord = {
   id: string;
   rawSessionId: string;
+  title?: string;
   createdByUserId: string;
   createdAt: string;
   matterId?: string;

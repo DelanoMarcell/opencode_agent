@@ -44,6 +44,7 @@ export async function resolveSessionRecord(sessionRecordId: string, organisation
   return {
     id: sessionRecord._id.toString(),
     rawSessionId: sessionRecord.sessionId,
+    title: sessionRecord.title ?? undefined,
     createdByUserId: sessionRecord.createdByUserId.toString(),
     createdAt: sessionRecord.createdAt.toISOString(),
     matterId: assignment?.matterId?.toString(),

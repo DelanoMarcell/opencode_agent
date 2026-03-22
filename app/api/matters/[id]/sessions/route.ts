@@ -17,12 +17,14 @@ type RouteContext = {
 function serializeSessionRecord(sessionRecord: {
   _id: { toString(): string };
   sessionId: string;
+  title?: string | null;
   createdByUserId: { toString(): string };
   createdAt: Date;
 }) {
   return {
     id: sessionRecord._id.toString(),
     rawSessionId: sessionRecord.sessionId,
+    title: sessionRecord.title ?? undefined,
     createdByUserId: sessionRecord.createdByUserId.toString(),
     createdAt: sessionRecord.createdAt.toISOString(),
   };

@@ -9,12 +9,14 @@ import { OpencodeSession } from "@/lib/models/opencode-session";
 function serializeSessionRecord(sessionRecord: {
   _id: { toString(): string };
   sessionId: string;
+  title?: string | null;
   createdByUserId: { toString(): string };
   createdAt: Date;
 }) {
   return {
     id: sessionRecord._id.toString(),
     rawSessionId: sessionRecord.sessionId,
+    title: sessionRecord.title ?? undefined,
     createdByUserId: sessionRecord.createdByUserId.toString(),
     createdAt: sessionRecord.createdAt.toISOString(),
   };
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { sessionId } = await req.json();
+    const { sessionId, title } = await req.json();
 
     if (!sessionId || typeof sessionId !== "string") {
       return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
@@ -44,6 +46,7 @@ export async function POST(req: Request) {
       const created = await OpencodeSession.create({
         organisationId: organisationObjectId,
         sessionId,
+        title: typeof title === "string" && title.trim() ? title.trim() : undefined,
         createdByUserId: user.id,
       });
       sessionRecord = created.toObject();

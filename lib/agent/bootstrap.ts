@@ -93,6 +93,7 @@ async function loadAccessibleAgentWorkspaceData(
     sessionRecordsByRawSessionId[sessionRecord.sessionId] = {
       id: sessionRecordId,
       rawSessionId: sessionRecord.sessionId,
+      title: sessionRecord.title ?? undefined,
       createdByUserId: sessionRecord.createdByUserId.toString(),
       createdAt: sessionRecord.createdAt.toISOString(),
       matterId: assignment?.matterId?.toString(),

@@ -29,6 +29,7 @@ import {
   type MatterChatSidebarMatter,
   type MatterChatSidebarSession,
 } from "@/components/agent-shell/matter-chat-sidebar";
+import type { EditableSession } from "@/components/agent-shell/rename-session-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAgentUsage } from "@/hooks/agent/use-agent-usage";
@@ -140,10 +141,43 @@ type AgentClientRuntimeProps = {
   bootstrap: AgentBootstrap;
 };
 
+type PendingSidebarSession = {
+  sessionRecordId: string;
+  rawSessionId: string;
+  matterId?: string;
+  title: string;
+  updated: number;
+  created: number;
+};
+
 function buildChatRoute(sessionRecordID: string, matterID?: string) {
   return matterID
     ? `/agent/matters/${matterID}/chats/${sessionRecordID}`
     : `/agent/chats/${sessionRecordID}`;
+}
+
+function isDefaultSessionTitle(title: string | null | undefined) {
+  const normalized = title?.trim().toLowerCase();
+  return !normalized || normalized === "untitled" || normalized === "untitled session";
+}
+
+function resolveDisplayedSessionTitle(
+  storedTitle: string | null | undefined,
+  opencodeTitle: string | null | undefined
+) {
+  if (!isDefaultSessionTitle(storedTitle)) {
+    return storedTitle!.trim();
+  }
+
+  if (opencodeTitle?.trim()) {
+    return opencodeTitle.trim();
+  }
+
+  if (storedTitle?.trim()) {
+    return storedTitle.trim();
+  }
+
+  return "Untitled";
 }
 
 function buildPromptFromComposerState(
@@ -431,6 +465,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const sessionOptionsAbortRef = useRef<AbortController | null>(null);
   const resumeAbortRef = useRef<AbortController | null>(null);
   const lastRouteSyncKeyRef = useRef("");
+  const pendingSidebarSessionRef = useRef<PendingSidebarSession | null>(null);
 
   useEffect(() => {
     sessionIDRef.current = sessionID;
@@ -2080,6 +2115,39 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     });
   }, []);
 
+  const handleSessionRenamed = useCallback((updatedSession: EditableSession) => {
+    const trimmedTitle = updatedSession.title.trim();
+    const nextTitle = trimmedTitle || "Untitled";
+
+    setAvailableSessions((current) =>
+      current.map((session) =>
+        session.id === updatedSession.rawSessionId ? { ...session, title: nextTitle } : session
+      )
+    );
+
+    setSessionRecordsByRawSessionId((current) => {
+      const existing = current[updatedSession.rawSessionId];
+      if (!existing) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [updatedSession.rawSessionId]: {
+          ...existing,
+          title: nextTitle,
+        },
+      };
+    });
+
+    if (pendingSidebarSessionRef.current?.rawSessionId === updatedSession.rawSessionId) {
+      pendingSidebarSessionRef.current = {
+        ...pendingSidebarSessionRef.current,
+        title: nextTitle,
+      };
+    }
+  }, []);
+
   const assignSessionRecordToMatter = useCallback(
     async (sessionRecord: AgentBootstrapSessionRecord, matterID: string) => {
       const response = await fetch(`/api/matters/${matterID}/sessions`, {
@@ -2113,7 +2181,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const registerSessionRecord = useCallback(
-    async (rawSessionID: string, matterID?: string) => {
+    async (rawSessionID: string, title?: string, matterID?: string) => {
       const existingSessionRecord = sessionRecordsByRawSessionId[rawSessionID];
       if (existingSessionRecord) {
         if (matterID && existingSessionRecord.matterId !== matterID) {
@@ -2139,6 +2207,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           },
           body: JSON.stringify({
             sessionId: rawSessionID,
+            title,
           }),
         });
 
@@ -2402,6 +2471,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setSessionRecordsByRawSessionId(bootstrap.sessionRecordsByRawSessionId);
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
+    pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
     setIsLoadingSelectedSession(
       Boolean(bootstrap.initialRawSessionId) && !bootstrap.initialSessionSnapshot?.loaded
@@ -2532,13 +2602,25 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     }
 
     const createdSession = sessionResult.data;
-    const sessionRecord = await registerSessionRecord(createdSession.id, selectedMatterID || undefined);
+    const sessionRecord = await registerSessionRecord(
+      createdSession.id,
+      createdSession.title?.trim() || undefined,
+      selectedMatterID || undefined
+    );
     resetSessionTokenTracking();
     sessionIDRef.current = createdSession.id;
     setSessionID(createdSession.id);
     setSelectedSessionID(createdSession.id);
     setSelectedSessionRecordID(sessionRecord.id);
     setSelectedMatterID(sessionRecord.matterId ?? selectedMatterID);
+    pendingSidebarSessionRef.current = {
+      sessionRecordId: sessionRecord.id,
+      rawSessionId: createdSession.id,
+      matterId: sessionRecord.matterId ?? selectedMatterID ?? undefined,
+      title: resolveDisplayedSessionTitle(sessionRecord.title, createdSession.title),
+      updated: Date.now(),
+      created: Date.now(),
+    };
     appendTrace(`session created: ${createdSession.id}`);
     void loadSessionOptions();
 
@@ -2631,6 +2713,24 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         sessionID: liveSessionID,
         parts: [{ type: "text", text: runtimePrompt }],
       });
+
+      const pendingSidebarSession = pendingSidebarSessionRef.current;
+      if (pendingSidebarSession?.rawSessionId === liveSessionID) {
+        setAvailableSessions((current) => {
+          const nextEntry: SessionOption = {
+            id: pendingSidebarSession.rawSessionId,
+            title: pendingSidebarSession.title,
+            updated: pendingSidebarSession.updated,
+            created: pendingSidebarSession.created,
+          };
+
+          const withoutCurrent = current.filter(
+            (session) => session.id !== pendingSidebarSession.rawSessionId
+          );
+          return [nextEntry, ...withoutCurrent].sort((left, right) => right.updated - left.updated);
+        });
+        pendingSidebarSessionRef.current = null;
+      }
 
       scheduleInteractiveRefresh(0);
     } catch (error) {
@@ -2965,7 +3065,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       {
         sessionRecordId: sessionRecord.id,
         rawSessionId: session.id,
-        title: session.title?.trim() ? session.title.trim() : "Untitled",
+        title: resolveDisplayedSessionTitle(sessionRecord.title, session.title),
         updatedLabel: new Date(session.updated || session.created).toLocaleDateString(),
         shortID: sessionRecord.id.slice(0, 8),
       },
@@ -3040,6 +3140,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           onOpenMattersWorkspace={handleOpenMattersWorkspace}
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectSessionRecord}
+          onSessionRenamed={handleSessionRenamed}
         />
 
         <Card className="agent-panel min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-2 py-0 shadow-none">

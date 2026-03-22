@@ -24,6 +24,10 @@ import {
   EditMatterDialog,
   type EditableMatter,
 } from "@/components/agent-shell/edit-matter-dialog";
+import {
+  RenameSessionDialog,
+  type EditableSession,
+} from "@/components/agent-shell/rename-session-dialog";
 import { RecentChatsLoader } from "@/components/loaders/recent-chats-loader";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,15 +110,26 @@ type MatterChatSidebarProps = {
   onOpenMattersWorkspace: () => void;
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (sessionRecordID: string) => void;
+  onSessionRenamed: (session: EditableSession) => void;
 };
 
 type RowActionMenuProps = {
   kind: "chat" | "matter";
+  rawSessionId?: string;
+  sessionRecordId?: string;
   title: string;
   onEditMatter?: () => void;
+  onRenameSession?: (session: EditableSession) => void;
 };
 
-function RowActionMenu({ kind, title, onEditMatter }: RowActionMenuProps) {
+function RowActionMenu({
+  kind,
+  rawSessionId,
+  sessionRecordId,
+  title,
+  onEditMatter,
+  onRenameSession,
+}: RowActionMenuProps) {
   function stopMenuEvent(event: Event) {
     event.stopPropagation();
   }
@@ -162,7 +177,15 @@ function RowActionMenu({ kind, title, onEditMatter }: RowActionMenuProps) {
           <>
             <DropdownMenuItem
               className="agent-menu-item rounded-none py-2"
-              onSelect={stopMenuEvent}
+              onSelect={(event) => {
+                stopMenuEvent(event);
+                if (!rawSessionId || !sessionRecordId) return;
+                onRenameSession?.({
+                  sessionRecordId,
+                  rawSessionId,
+                  title,
+                });
+              }}
             >
               <Pencil className="size-4" />
               Rename
@@ -198,6 +221,7 @@ type SidebarBodyProps = {
   onSelectMatter: (matterID: string) => void;
   onSelectSession: (sessionRecordID: string) => void;
   onEditMatter: (matterID: string) => void;
+  onRenameSession: (session: EditableSession) => void;
   onToggleMatter: (matterID: string) => void;
 };
 
@@ -218,6 +242,7 @@ function SidebarBody({
   onSelectMatter,
   onSelectSession,
   onEditMatter,
+  onRenameSession,
   onToggleMatter,
 }: SidebarBodyProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -356,7 +381,13 @@ function SidebarBody({
                         </div>
                       </button>
                       <div className="shrink-0">
-                        <RowActionMenu kind="chat" title={chat.title} />
+                        <RowActionMenu
+                          kind="chat"
+                          rawSessionId={chat.rawSessionId}
+                          sessionRecordId={chat.sessionRecordId}
+                          title={chat.title}
+                          onRenameSession={onRenameSession}
+                        />
                       </div>
                     </div>
                   );
@@ -495,7 +526,13 @@ function SidebarBody({
                                   </div>
                                 </button>
                                 <div className="shrink-0">
-                                  <RowActionMenu kind="chat" title={chat.title} />
+                                  <RowActionMenu
+                                    kind="chat"
+                                    rawSessionId={chat.rawSessionId}
+                                    sessionRecordId={chat.sessionRecordId}
+                                    title={chat.title}
+                                    onRenameSession={onRenameSession}
+                                  />
                                 </div>
                               </div>
                             );
@@ -585,11 +622,14 @@ export function MatterChatSidebar({
   onOpenMattersWorkspace,
   onSelectMatter,
   onSelectSession,
+  onSessionRenamed,
 }: MatterChatSidebarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCreateMatterOpen, setIsCreateMatterOpen] = useState(false);
   const [isEditMatterOpen, setIsEditMatterOpen] = useState(false);
+  const [isRenameSessionOpen, setIsRenameSessionOpen] = useState(false);
   const [editingMatterID, setEditingMatterID] = useState<string | null>(null);
+  const [editingSession, setEditingSession] = useState<EditableSession | null>(null);
   const [expandedMatters, setExpandedMatters] = useState<Record<string, boolean>>(() =>
     buildExpandedMattersState(matters, selectedMatterID, selectedSessionRecordID)
   );
@@ -635,6 +675,12 @@ export function MatterChatSidebar({
     onMatterUpdated(matter);
   };
 
+  const handleRenameSession = (session: EditableSession) => {
+    setEditingSession(session);
+    setIsMobileOpen(false);
+    setIsRenameSessionOpen(true);
+  };
+
   const handleToggleMatter = (matterID: string) => {
     setExpandedMatters((current) => ({
       ...current,
@@ -675,6 +721,7 @@ export function MatterChatSidebar({
           onSelectMatter={handleSelectMatter}
           onSelectSession={handleSelectSession}
           onEditMatter={handleEditMatter}
+          onRenameSession={handleRenameSession}
           onToggleMatter={handleToggleMatter}
         />
       </aside>
@@ -708,6 +755,7 @@ export function MatterChatSidebar({
             onSelectMatter={handleSelectMatter}
             onSelectSession={handleSelectSession}
             onEditMatter={handleEditMatter}
+            onRenameSession={handleRenameSession}
             onToggleMatter={handleToggleMatter}
           />
         </SheetContent>
@@ -737,6 +785,17 @@ export function MatterChatSidebar({
           }
         }}
         onMatterUpdated={handleMatterUpdated}
+      />
+      <RenameSessionDialog
+        open={isRenameSessionOpen}
+        session={editingSession}
+        onOpenChange={(open) => {
+          setIsRenameSessionOpen(open);
+          if (!open) {
+            setEditingSession(null);
+          }
+        }}
+        onSessionRenamed={onSessionRenamed}
       />
     </>
   );
