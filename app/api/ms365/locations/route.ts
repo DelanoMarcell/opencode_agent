@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
-import {
-  listAllowedMs365LocationSummaries,
-} from "@/lib/ms365/browser";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
+import { listAllowedMs365LocationSummaries } from "@/lib/ms365/browser";
 import { Ms365GraphError } from "@/lib/ms365/graph";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthenticatedOrganisationUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const locations = await listAllowedMs365LocationSummaries();
+    const locations = await listAllowedMs365LocationSummaries(user.organisationId);
     return NextResponse.json({ locations });
   } catch (error) {
     if (error instanceof Ms365GraphError) {

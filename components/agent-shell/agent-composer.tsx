@@ -1,10 +1,9 @@
 "use client";
 
 import { type KeyboardEvent, type RefObject } from "react";
-import { Paperclip, X } from "lucide-react";
+import { Paperclip } from "lucide-react";
 
 import { AgentComposerLoader } from "@/components/loaders/agent-composer-loader";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,7 +29,6 @@ import {
 import { formatUsdAmount } from "@/lib/agent-runtime/helpers";
 import type { CostFormulaGroup, TokenUsageTotals } from "@/lib/agent-runtime/types";
 import type { StoredFileSummary } from "@/lib/files/types";
-import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 type StatRow = {
   label: string;
@@ -48,12 +46,10 @@ type AgentComposerProps = {
   isLoadingSelectedSession: boolean;
   latestContextUsage: TokenUsageTotals | null;
   modelLabel: string;
-  ms365Attachments: Array<Ms365AttachmentSelection>;
   canManageFiles: boolean;
   currentFilesSummary?: StoredFileSummary;
   onInputTextChange: (value: string) => void;
   onOpenFiles: () => void;
-  onMs365AttachmentRemove: (key: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
   sendDisabled: boolean;
@@ -75,12 +71,10 @@ export function AgentComposer({
   isLoadingSelectedSession,
   latestContextUsage,
   modelLabel,
-  ms365Attachments,
   canManageFiles,
   currentFilesSummary,
   onInputTextChange,
   onOpenFiles,
-  onMs365AttachmentRemove,
   onKeyDown,
   onSend,
   sendDisabled,
@@ -96,37 +90,11 @@ export function AgentComposer({
     : isBusy
       ? "Waiting for assistant response..."
       : "Press Enter to send, Shift+Enter for newline.";
-  const filesLabel = filesScopeLabel === "matter" ? "matter" : "session";
+  const filesLabel = filesScopeLabel === "matter" ? "Matter files" : "Session files";
 
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
       <div className="space-y-2">
-        {ms365Attachments.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {ms365Attachments.map((attachment) => {
-              const key = `${attachment.locationId}:${attachment.id}`;
-
-              return (
-                <Badge
-                  key={key}
-                  variant="outline"
-                  className="gap-1 rounded-none border-2 px-2 py-1"
-                >
-                  <Paperclip className="size-3" />
-                  <span className="max-w-56 truncate">{attachment.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${attachment.name}`}
-                    className="ml-1 inline-flex items-center"
-                    onClick={() => onMs365AttachmentRemove(key)}
-                  >
-                    <X className="size-3" />
-                  </button>
-                </Badge>
-              );
-            })}
-          </div>
-        ) : null}
         <Textarea
           ref={textareaRef}
           value={inputText}
@@ -365,7 +333,7 @@ export function AgentComposer({
                     onOpenFiles();
                   }}
                 >
-                  {`Files from this ${filesLabel}`}
+                  {filesLabel}
                   {currentFilesSummary?.fileCount
                     ? ` (${currentFilesSummary.fileCount})`
                     : ""}

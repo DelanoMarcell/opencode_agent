@@ -98,8 +98,11 @@ async function resolveBaseLocation(
   };
 }
 
-async function resolveLocation(locationId: string): Promise<ResolvedLocation> {
-  const baseLocation = await getAllowedMs365LocationById(locationId);
+async function resolveLocation(
+  organisationId: string,
+  locationId: string
+): Promise<ResolvedLocation> {
+  const baseLocation = await getAllowedMs365LocationById(organisationId, locationId);
   if (!baseLocation) {
     throw new Error("Unknown Microsoft 365 location.");
   }
@@ -164,20 +167,23 @@ function serializeBrowserItem(item: GraphDriveItem, driveId: string): Ms365Brows
   };
 }
 
-export async function listAllowedMs365LocationSummaries(): Promise<
+export async function listAllowedMs365LocationSummaries(
+  organisationId: string
+): Promise<
   Array<Ms365LocationSummary>
 > {
-  const locations = await listAllowedMs365Locations();
+  const locations = await listAllowedMs365Locations(organisationId);
   const resolvedLocations = await Promise.all(locations.map(resolveBaseLocation));
 
   return resolvedLocations.map(toPublicLocation);
 }
 
 export async function listMs365LocationChildren(args: {
+  organisationId: string;
   locationId: string;
   itemId?: string;
 }) {
-  const location = await resolveLocation(args.locationId);
+  const location = await resolveLocation(args.organisationId, args.locationId);
   const requestedItemId = args.itemId?.trim() || location.rootItemId;
   const requestedItem = await getItemMetadata(location.driveId, requestedItemId);
 

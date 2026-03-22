@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { listMs365LocationChildren } from "@/lib/ms365/browser";
 import { Ms365GraphError } from "@/lib/ms365/graph";
 
@@ -12,8 +11,8 @@ type RouteContext = {
 };
 
 export async function GET(request: Request, context: RouteContext) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const user = await getAuthenticatedOrganisationUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -22,7 +21,11 @@ export async function GET(request: Request, context: RouteContext) {
   const itemId = url.searchParams.get("itemId") ?? undefined;
 
   try {
-    const result = await listMs365LocationChildren({ locationId, itemId });
+    const result = await listMs365LocationChildren({
+      organisationId: user.organisationId,
+      locationId,
+      itemId,
+    });
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof Ms365GraphError) {

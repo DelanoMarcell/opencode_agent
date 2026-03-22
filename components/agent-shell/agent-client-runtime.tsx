@@ -90,7 +90,6 @@ import type {
   AgentBootstrapMatter,
   AgentBootstrapSessionRecord,
 } from "@/lib/agent/types";
-import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 import type {
   StoredFileListItem,
   StoredFileSummary,
@@ -194,33 +193,11 @@ function resolveDisplayedSessionTitle(
   return "Untitled";
 }
 
-function buildPromptFromComposerState(
-  promptText: string,
-  attachments: Array<Ms365AttachmentSelection>
-) {
+function buildPromptFromComposerState(promptText: string) {
   const trimmedPrompt = promptText.trim();
-  if (attachments.length === 0) {
-    return {
-      displayPrompt: trimmedPrompt,
-      runtimePrompt: trimmedPrompt,
-    };
-  }
-
-  const promptBody =
-    trimmedPrompt || "Use the attached Microsoft 365 files as context for this request.";
-  const displayLines = attachments.map(
-    (attachment) => `- ${attachment.name} (${attachment.locationLabel})`
-  );
-  const runtimeLines = attachments.map(
-    (attachment) =>
-      `- ${attachment.name} | location=${attachment.locationLabel} | driveId=${attachment.driveId} | itemId=${attachment.id}${
-        attachment.webUrl ? ` | webUrl=${attachment.webUrl}` : ""
-      }`
-  );
-
   return {
-    displayPrompt: `${promptBody}\n\nAttached Microsoft 365 files:\n${displayLines.join("\n")}`,
-    runtimePrompt: `${promptBody}\n\nAttached Microsoft 365 files:\n${runtimeLines.join("\n")}`,
+    displayPrompt: trimmedPrompt,
+    runtimePrompt: trimmedPrompt,
   };
 }
 
@@ -394,7 +371,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [matters, setMatters] = useState<Array<AgentBootstrapMatter>>(bootstrap.matters);
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
-  const [ms365Attachments, setMs365Attachments] = useState<Array<Ms365AttachmentSelection>>([]);
   const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [filesDialogRefreshToken, setFilesDialogRefreshToken] = useState(0);
@@ -2765,16 +2741,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   ]);
 
   const sendPrompt = useCallback(async () => {
-    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(
-      inputText,
-      ms365Attachments
-    );
+    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(inputText);
     if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
 
     setInputText("");
-    setMs365Attachments([]);
     setErrorText(null);
     setPendingQuestions([]);
     setPendingPermissions([]);
@@ -2881,28 +2853,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     isBusy,
     isLoadingSelectedSession,
     markAssistantCardsComplete,
-    ms365Attachments,
     scheduleInteractiveRefresh,
   ]);
-
-  const handleMs365AttachmentsAdd = useCallback(
-    (files: Array<Ms365AttachmentSelection>) => {
-      setMs365Attachments((current) => {
-        const next = new Map(current.map((file) => [`${file.locationId}:${file.id}`, file]));
-        for (const file of files) {
-          next.set(`${file.locationId}:${file.id}`, file);
-        }
-        return Array.from(next.values());
-      });
-    },
-    []
-  );
-
-  const handleMs365AttachmentRemove = useCallback((key: string) => {
-    setMs365Attachments((current) =>
-      current.filter((attachment) => `${attachment.locationId}:${attachment.id}` !== key)
-    );
-  }, []);
 
   const handlePermissionReply = useCallback(
     async (requestID: string, reply: "once" | "always" | "reject") => {
@@ -3343,15 +3295,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             isLoadingSelectedSession={isLoadingSelectedSession}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
-            ms365Attachments={ms365Attachments}
             onInputTextChange={setInputText}
             currentFilesSummary={currentFilesSummary}
             onOpenFiles={handleOpenFiles}
-            onMs365AttachmentRemove={handleMs365AttachmentRemove}
             onKeyDown={handleComposerKeyDown}
             onSend={() => void sendPrompt()}
             sendDisabled={
-              (!inputText.trim() && ms365Attachments.length === 0) ||
+              !inputText.trim() ||
               isBusy ||
               isLoadingSelectedSession ||
               isMatterSelectionRequired
@@ -3377,7 +3327,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           scope={activeFilesScope}
           resourceId={currentFilesResourceId}
           onOpenChange={setIsFilesDialogOpen}
-          onMs365AttachmentsAdd={handleMs365AttachmentsAdd}
           onSummaryChange={handleFilesSummaryChange}
           refreshToken={filesDialogRefreshToken}
         />

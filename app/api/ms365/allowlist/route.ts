@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import {
   addAllowedMs365LocationFromUrl,
   getMs365AllowlistAdminPassword,
@@ -14,13 +15,18 @@ const allowlistInputSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const user = await getAuthenticatedOrganisationUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = allowlistInputSchema.parse((await request.json()) as unknown);
 
     if (body.adminPassword !== getMs365AllowlistAdminPassword()) {
       return NextResponse.json({ error: "Invalid admin password" }, { status: 401 });
     }
 
-    const result = await addAllowedMs365LocationFromUrl(body.url);
+    const result = await addAllowedMs365LocationFromUrl(user.organisationId, body.url);
 
     return NextResponse.json({
       created: result.created,

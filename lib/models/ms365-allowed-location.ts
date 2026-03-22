@@ -2,11 +2,16 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
 const ms365AllowedLocationSchema = new Schema(
   {
+    organisationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organisation",
+      required: true,
+      index: true,
+    },
     id: {
       type: String,
       required: true,
       trim: true,
-      unique: true,
       index: true,
     },
     label: {
@@ -41,7 +46,8 @@ const ms365AllowedLocationSchema = new Schema(
   { timestamps: true }
 );
 
-ms365AllowedLocationSchema.index({ sourceUrl: 1 }, { unique: true });
+ms365AllowedLocationSchema.index({ organisationId: 1, id: 1 }, { unique: true });
+ms365AllowedLocationSchema.index({ organisationId: 1, sourceUrl: 1 }, { unique: true });
 
 export type IMs365AllowedLocation = InferSchemaType<typeof ms365AllowedLocationSchema> & {
   _id: mongoose.Types.ObjectId;

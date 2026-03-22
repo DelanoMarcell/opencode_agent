@@ -42,7 +42,6 @@ import type {
   StoredFileSummary,
   StoredFileUploadResult,
 } from "@/lib/files/types";
-import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 type FilesDialogScope = "session" | "matter";
 
@@ -60,7 +59,6 @@ type SessionFilesDialogProps = {
   scope: FilesDialogScope;
   resourceId?: string;
   onOpenChange: (open: boolean) => void;
-  onMs365AttachmentsAdd: (files: Array<Ms365AttachmentSelection>) => void;
   onSummaryChange: (
     scope: FilesDialogScope,
     resourceId: string,
@@ -165,7 +163,6 @@ export function SessionFilesDialog({
   scope,
   resourceId,
   onOpenChange,
-  onMs365AttachmentsAdd,
   onSummaryChange,
   refreshToken = 0,
 }: SessionFilesDialogProps) {
@@ -541,7 +538,6 @@ export function SessionFilesDialog({
         />
         <Ms365AttachDialog
           disabled={!resourceId}
-          onAttach={onMs365AttachmentsAdd}
           open={isMs365DialogOpen}
           onOpenChange={setIsMs365DialogOpen}
           showTrigger={false}
@@ -839,7 +835,7 @@ export function SessionFilesDialog({
                   disabled={!canUploadFiles || !resourceId}
                 >
                   {isUploadingFiles ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-                  {isUploadingFiles ? "Adding files..." : "Add files"}
+                  {isUploadingFiles ? "Adding files..." : "Upload files"}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent

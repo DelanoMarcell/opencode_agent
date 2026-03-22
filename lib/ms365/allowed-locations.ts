@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import { connectDB } from "@/lib/mongodb";
 import { Ms365AllowedLocationModel } from "@/lib/models/ms365-allowed-location";
 import { resolveSharePointUrlToAllowedLocation } from "@/lib/ms365/sharepoint-url-resolver";
@@ -33,10 +35,15 @@ export function getMs365AllowlistAdminPassword() {
   return requireEnv("MS365_ALLOWLIST_ADMIN_PASSWORD");
 }
 
-export async function listAllowedMs365Locations(): Promise<Array<Ms365AllowedLocation>> {
+export async function listAllowedMs365Locations(
+  organisationId: string
+): Promise<Array<Ms365AllowedLocation>> {
   await connectDB();
+  const organisationObjectId = new mongoose.Types.ObjectId(organisationId);
 
-  const locations = await Ms365AllowedLocationModel.find()
+  const locations = await Ms365AllowedLocationModel.find({
+    organisationId: organisationObjectId,
+  })
     .sort({ label: 1, createdAt: 1 })
     .lean();
 
@@ -44,11 +51,16 @@ export async function listAllowedMs365Locations(): Promise<Array<Ms365AllowedLoc
 }
 
 export async function getAllowedMs365LocationById(
+  organisationId: string,
   id: string
 ): Promise<Ms365AllowedLocation | null> {
   await connectDB();
+  const organisationObjectId = new mongoose.Types.ObjectId(organisationId);
 
-  const location = await Ms365AllowedLocationModel.findOne({ id }).lean();
+  const location = await Ms365AllowedLocationModel.findOne({
+    organisationId: organisationObjectId,
+    id,
+  }).lean();
   if (!location) {
     return null;
   }
@@ -56,14 +68,16 @@ export async function getAllowedMs365LocationById(
   return serializeAllowedLocation(location);
 }
 
-export async function addAllowedMs365LocationFromUrl(url: string) {
+export async function addAllowedMs365LocationFromUrl(organisationId: string, url: string) {
   await connectDB();
+  const organisationObjectId = new mongoose.Types.ObjectId(organisationId);
 
   const resolved = await resolveSharePointUrlToAllowedLocation({ url });
   const entry = resolved.suggestedEntry;
 
   try {
     const created = await Ms365AllowedLocationModel.create({
+      organisationId: organisationObjectId,
       id: entry.id,
       label: entry.label,
       siteId: entry.siteId,
@@ -85,9 +99,11 @@ export async function addAllowedMs365LocationFromUrl(url: string) {
 
     const existing =
       (await Ms365AllowedLocationModel.findOne({
+        organisationId: organisationObjectId,
         $or: [{ id: entry.id }, { sourceUrl: url }],
       }).lean()) ??
       (await Ms365AllowedLocationModel.findOne({
+        organisationId: organisationObjectId,
         id: entry.id,
       }).lean());
 
