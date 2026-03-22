@@ -1,6 +1,13 @@
-import { getAllowedMs365Locations } from "@/lib/ms365/config";
+import {
+  getAllowedMs365LocationById,
+  listAllowedMs365Locations,
+} from "@/lib/ms365/allowed-locations";
 import { ms365GraphGet } from "@/lib/ms365/graph";
-import type { Ms365BrowserItem, Ms365LocationSummary } from "@/lib/ms365/types";
+import type {
+  Ms365AllowedLocation,
+  Ms365BrowserItem,
+  Ms365LocationSummary,
+} from "@/lib/ms365/types";
 
 type GraphDrive = {
   id: string;
@@ -27,6 +34,12 @@ type ResolvedLocation = Ms365LocationSummary & {
   rootPathPrefix: string;
 };
 
+function toPublicLocation(location: ResolvedLocation): Ms365LocationSummary {
+  const { rootPathPrefix, ...publicLocation } = location;
+  void rootPathPrefix;
+  return publicLocation;
+}
+
 function normalizeRootPathPrefix(item: GraphDriveItem, driveId: string) {
   const parentPath = item.parentReference?.path;
   if (!parentPath) {
@@ -35,14 +48,9 @@ function normalizeRootPathPrefix(item: GraphDriveItem, driveId: string) {
   return `${parentPath}/${item.name}`;
 }
 
-async function resolveLocation(locationId: string): Promise<ResolvedLocation> {
-  const baseLocation = getAllowedMs365Locations().find(
-    (candidate) => candidate.id === locationId
-  );
-  if (!baseLocation) {
-    throw new Error("Unknown Microsoft 365 location.");
-  }
-
+async function resolveBaseLocation(
+  baseLocation: Ms365AllowedLocation
+): Promise<ResolvedLocation> {
   const drive =
     baseLocation.driveId !== undefined
       ? ({
@@ -88,6 +96,15 @@ async function resolveLocation(locationId: string): Promise<ResolvedLocation> {
     rootName: rootItem.name,
     rootPathPrefix: normalizeRootPathPrefix(rootItem, drive.id),
   };
+}
+
+async function resolveLocation(locationId: string): Promise<ResolvedLocation> {
+  const baseLocation = await getAllowedMs365LocationById(locationId);
+  if (!baseLocation) {
+    throw new Error("Unknown Microsoft 365 location.");
+  }
+
+  return resolveBaseLocation(baseLocation);
 }
 
 async function getItemMetadata(driveId: string, itemId: string): Promise<GraphDriveItem> {
@@ -150,12 +167,10 @@ function serializeBrowserItem(item: GraphDriveItem, driveId: string): Ms365Brows
 export async function listAllowedMs365LocationSummaries(): Promise<
   Array<Ms365LocationSummary>
 > {
-  const locations = getAllowedMs365Locations();
-  const resolvedLocations = await Promise.all(
-    locations.map((location) => resolveLocation(location.id))
-  );
+  const locations = await listAllowedMs365Locations();
+  const resolvedLocations = await Promise.all(locations.map(resolveBaseLocation));
 
-  return resolvedLocations.map(({ rootPathPrefix: _rootPathPrefix, ...location }) => location);
+  return resolvedLocations.map(toPublicLocation);
 }
 
 export async function listMs365LocationChildren(args: {
@@ -195,10 +210,8 @@ export async function listMs365LocationChildren(args: {
     })
     .map((item) => serializeBrowserItem(item, location.driveId));
 
-  const { rootPathPrefix: _rootPathPrefix, ...publicLocation } = location;
-
   return {
-    location: publicLocation,
+    location: toPublicLocation(location),
     currentFolder: serializeBrowserItem(requestedItem, location.driveId),
     items,
   };

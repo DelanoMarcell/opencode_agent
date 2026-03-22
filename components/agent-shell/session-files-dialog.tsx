@@ -23,6 +23,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -30,11 +36,13 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Ms365AttachDialog } from "@/components/agent-shell/ms365-attach-dialog";
 import type {
   StoredFileListItem,
   StoredFileSummary,
   StoredFileUploadResult,
 } from "@/lib/files/types";
+import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 type FilesDialogScope = "session" | "matter";
 
@@ -50,14 +58,9 @@ type SessionFilesDialogProps = {
   } | null>;
   open: boolean;
   scope: FilesDialogScope;
-  queuedUploadRequest?: {
-    id: number;
-    scope: FilesDialogScope;
-    files: Array<File>;
-  } | null;
   resourceId?: string;
   onOpenChange: (open: boolean) => void;
-  onQueuedUploadHandled?: (requestId: number) => void;
+  onMs365AttachmentsAdd: (files: Array<Ms365AttachmentSelection>) => void;
   onSummaryChange: (
     scope: FilesDialogScope,
     resourceId: string,
@@ -160,16 +163,15 @@ export function SessionFilesDialog({
   onAddFiles,
   open,
   scope,
-  queuedUploadRequest = null,
   resourceId,
   onOpenChange,
-  onQueuedUploadHandled,
+  onMs365AttachmentsAdd,
   onSummaryChange,
   refreshToken = 0,
 }: SessionFilesDialogProps) {
   const localFileInputRef = useRef<HTMLInputElement | null>(null);
-  const lastHandledQueuedUploadIdRef = useRef<number | null>(null);
   const tableScrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const [isMs365DialogOpen, setIsMs365DialogOpen] = useState(false);
   const [files, setFiles] = useState<Array<StoredFileListItem>>([]);
   const [pendingUploads, setPendingUploads] = useState<Array<PendingUploadRow>>([]);
   const [query, setQuery] = useState("");
@@ -520,24 +522,6 @@ export function SessionFilesDialog({
     }
   }, [onAddFiles, onSummaryChange, resourceId, schedulePendingUploadRemoval]);
 
-  useEffect(() => {
-    if (!open || !resourceId || !queuedUploadRequest) {
-      return;
-    }
-
-    if (queuedUploadRequest.scope !== scope) {
-      return;
-    }
-
-    if (lastHandledQueuedUploadIdRef.current === queuedUploadRequest.id) {
-      return;
-    }
-
-    lastHandledQueuedUploadIdRef.current = queuedUploadRequest.id;
-    onQueuedUploadHandled?.(queuedUploadRequest.id);
-    void processChosenFiles(queuedUploadRequest.files);
-  }, [onQueuedUploadHandled, open, processChosenFiles, queuedUploadRequest, resourceId, scope]);
-
   async function handleLocalFilesChosen(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget;
     const nextFiles = Array.from(input.files ?? []);
@@ -554,6 +538,13 @@ export function SessionFilesDialog({
           multiple
           className="hidden"
           onChange={handleLocalFilesChosen}
+        />
+        <Ms365AttachDialog
+          disabled={!resourceId}
+          onAttach={onMs365AttachmentsAdd}
+          open={isMs365DialogOpen}
+          onOpenChange={setIsMs365DialogOpen}
+          showTrigger={false}
         />
 
         {/* Header */}
@@ -689,13 +680,11 @@ export function SessionFilesDialog({
                                 <Loader2
                                   className="size-4 animate-spin text-(--brand-strong)"
                                   aria-label={statusTitle}
-                                  title={statusTitle}
                                 />
                               ) : (
                                 <AlertCircle
                                   className={`size-4 ${statusIconClassName}`}
                                   aria-label={statusTitle}
-                                  title={statusTitle}
                                 />
                               )}
                             </div>
@@ -837,20 +826,47 @@ export function SessionFilesDialog({
               type="button"
               variant="outline"
               className="agent-btn rounded-none border-2 shadow-none"
-              disabled={!canUploadFiles || isUploadingFiles || !resourceId}
-              onClick={handleOpenLocalFilePicker}
-            >
-              {isUploadingFiles ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-              {isUploadingFiles ? "Adding files..." : "Add files"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="agent-btn rounded-none border-2 shadow-none"
               onClick={() => onOpenChange(false)}
             >
               Close
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="agent-btn rounded-none border-2 shadow-none"
+                  disabled={!canUploadFiles || !resourceId}
+                >
+                  {isUploadingFiles ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+                  {isUploadingFiles ? "Adding files..." : "Add files"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="agent-menu w-56 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+              >
+                <DropdownMenuItem
+                  className="agent-menu-item rounded-none py-2"
+                  disabled={isUploadingFiles}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleOpenLocalFilePicker();
+                  }}
+                >
+                  {isUploadingFiles ? "Uploading…" : "From your device"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="agent-menu-item rounded-none py-2"
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setIsMs365DialogOpen(true);
+                  }}
+                >
+                  From Microsoft 365
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </DialogContent>

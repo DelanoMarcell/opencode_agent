@@ -176,8 +176,5 @@ export async function resolveSharePointUrlToAllowedLocation(input: unknown) {
       webUrl: resolvedWebUrl,
     },
     suggestedEntry,
-    suggestedJson: JSON.stringify([suggestedEntry], null, 2),
-    suggestedEnvValue: JSON.stringify([suggestedEntry]),
-    suggestedEnvLine: `MS365_ALLOWED_LOCATIONS_JSON=${JSON.stringify([suggestedEntry])}`,
   };
 }

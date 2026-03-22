@@ -1,11 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Check,
-  ChevronDown,
   ChevronLeft,
-  Copy,
   FileText,
   Folder,
   Loader2,
@@ -16,11 +14,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -45,27 +38,6 @@ type Ms365AttachDialogProps = {
 type BrowseResponse = {
   currentFolder: Ms365BrowserItem;
   items: Array<Ms365BrowserItem>;
-};
-
-type ResolveResponse = {
-  parsed: {
-    hostname: string;
-    sitePath: string;
-    libraryName: string;
-    folderPath: string | null;
-  };
-  resolved: {
-    siteId: string;
-    siteName: string | null;
-    siteWebUrl: string | null;
-    driveId: string;
-    driveName: string | null;
-    driveWebUrl: string | null;
-    rootItemId: string | null;
-    rootName: string;
-    webUrl: string;
-  };
-  suggestedJson: string;
 };
 
 function formatItemMeta(item: Ms365BrowserItem) {
@@ -103,15 +75,6 @@ export function Ms365AttachDialog({
   const [selectedByKey, setSelectedByKey] = useState<
     Record<string, Ms365AttachmentSelection>
   >({});
-  const [showResolver, setShowResolver] = useState(false);
-  const [resolverUrl, setResolverUrl] = useState("");
-  const [resolverLabel, setResolverLabel] = useState("");
-  const [resolverId, setResolverId] = useState("");
-  const [resolverError, setResolverError] = useState<string | null>(null);
-  const [resolverOutput, setResolverOutput] = useState("");
-  const [resolverSummary, setResolverSummary] = useState<ResolveResponse | null>(null);
-  const [isResolving, setIsResolving] = useState(false);
-  const [copiedResolverOutput, setCopiedResolverOutput] = useState(false);
 
   const activeLocation = useMemo(
     () => locations.find((location) => location.id === activeLocationId) ?? null,
@@ -211,7 +174,6 @@ export function Ms365AttachDialog({
     }
 
     setErrorText(null);
-    setCopiedResolverOutput(false);
     void loadLocations();
   }, [loadLocations, open]);
 
@@ -288,63 +250,7 @@ export function Ms365AttachDialog({
     onAttach(selectedFiles);
     setSelectedByKey({});
     setOpen(false);
-  }, [onAttach, selectedFiles]);
-
-  const handleResolveSharePointUrl = useCallback(async () => {
-    const url = resolverUrl.trim();
-    if (!url) {
-      setResolverError("Paste a SharePoint or Teams Files URL first.");
-      return;
-    }
-
-    setIsResolving(true);
-    setResolverError(null);
-
-    try {
-      const response = await fetch("/api/ms365/resolve-sharepoint-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url,
-          label: resolverLabel.trim() || undefined,
-          id: resolverId.trim() || undefined,
-        }),
-      });
-      const data = (await response.json()) as ResolveResponse & { error?: string };
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "Failed to resolve SharePoint URL.");
-      }
-
-      setResolverSummary(data);
-      setResolverOutput(data.suggestedJson);
-      setCopiedResolverOutput(false);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to resolve SharePoint URL.";
-      setResolverError(message);
-      setResolverSummary(null);
-      setResolverOutput("");
-    } finally {
-      setIsResolving(false);
-    }
-  }, [resolverId, resolverLabel, resolverUrl]);
-
-  const handleCopyResolverOutput = useCallback(async () => {
-    if (!resolverOutput) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(resolverOutput);
-      setCopiedResolverOutput(true);
-      window.setTimeout(() => {
-        setCopiedResolverOutput(false);
-      }, 1500);
-    } catch {
-      setCopiedResolverOutput(false);
-    }
-  }, [resolverOutput]);
+  }, [onAttach, selectedFiles, setOpen]);
 
   const breadcrumb = useMemo(() => {
     if (!hasLocations) return null;
@@ -384,7 +290,7 @@ export function Ms365AttachDialog({
                   Attach from Microsoft 365
                 </DialogTitle>
                 <p className="text-sm text-(--ink-muted)">
-                  Browse allowlisted SharePoint and OneDrive locations.
+                  Browse files from SharePoint locations.
                 </p>
               </div>
             </div>
@@ -392,141 +298,6 @@ export function Ms365AttachDialog({
 
           {/* ── Scrollable body ───────────────────────────────── */}
           <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
-
-            {/* Allowlist Helper */}
-            <Collapsible
-              open={showResolver}
-              onOpenChange={setShowResolver}
-              className="border-b-2 border-(--border)"
-            >
-              <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left transition-colors hover:bg-(--surface-hover)"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                      Allowlist Helper
-                    </p>
-                    <p className="text-sm text-(--ink-muted)">
-                      Resolve a SharePoint URL to generate the env JSON entry.
-                    </p>
-                  </div>
-                  <ChevronDown
-                    className={`size-4 shrink-0 text-(--ink-soft) transition-transform duration-150 ${
-                      showResolver ? "rotate-180" : ""
-                    }`}
-                  />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="space-y-4 border-t-2 border-(--border) bg-(--surface)/50 px-5 py-5">
-                  {/* URL */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                      SharePoint or Teams Files URL
-                    </p>
-                    <textarea
-                      value={resolverUrl}
-                      onChange={(e) => setResolverUrl(e.target.value)}
-                      placeholder="Paste a SharePoint or Teams Files URL here…"
-                      className="agent-field min-h-20 w-full resize-y border-2 px-3 py-2 text-sm outline-none [field-sizing:fixed]"
-                    />
-                  </div>
-
-                  {/* Label + ID */}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                        Label{" "}
-                        <span className="ml-1 text-[10px] font-medium tracking-normal text-(--ink-muted)">
-                          Optional
-                        </span>
-                      </p>
-                      <input
-                        value={resolverLabel}
-                        onChange={(e) => setResolverLabel(e.target.value)}
-                        placeholder="Agent Chronologies"
-                        className="agent-field h-9 w-full border-2 px-3 text-sm outline-none"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                        ID{" "}
-                        <span className="ml-1 text-[10px] font-medium tracking-normal text-(--ink-muted)">
-                          Optional
-                        </span>
-                      </p>
-                      <input
-                        value={resolverId}
-                        onChange={(e) => setResolverId(e.target.value)}
-                        placeholder="agent-chronologies"
-                        className="agent-field h-9 w-full border-2 px-3 text-sm outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Resolve action row */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      type="button"
-                      className="agent-btn-primary rounded-none border-2 shadow-none"
-                      onClick={() => void handleResolveSharePointUrl()}
-                      disabled={isResolving}
-                    >
-                      {isResolving ? <Loader2 className="size-4 animate-spin" /> : null}
-                      Resolve URL
-                    </Button>
-                    {resolverSummary ? (
-                      <p className="min-w-0 flex-1 text-xs text-(--ink-soft)">
-                        <span className="font-medium">
-                          {resolverSummary.resolved.siteName ?? resolverSummary.parsed.sitePath}
-                        </span>
-                        {" · "}
-                        {resolverSummary.resolved.driveName ?? resolverSummary.parsed.libraryName}
-                        {" · "}
-                        {resolverSummary.resolved.rootName}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {/* Resolver error */}
-                  {resolverError ? (
-                    <div className="border-2 border-(--danger) bg-(--danger-soft) px-3 py-2.5 text-sm text-(--danger)">
-                      {resolverError}
-                    </div>
-                  ) : null}
-
-                  {/* JSON output */}
-                  {resolverOutput ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
-                          Env JSON
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="agent-btn rounded-none border-2 shadow-none"
-                          onClick={() => void handleCopyResolverOutput()}
-                        >
-                          {copiedResolverOutput ? (
-                            <Check className="size-4" />
-                          ) : (
-                            <Copy className="size-4" />
-                          )}
-                          {copiedResolverOutput ? "Copied" : "Copy JSON"}
-                        </Button>
-                      </div>
-                      <pre className="agent-field max-h-44 overflow-y-auto whitespace-pre-wrap break-all border-2 px-3 py-3 font-mono text-xs leading-5">
-                        {resolverOutput}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-
             {/* ── Location tab bar ──────────────────────────────── */}
             <div className="border-b-2 border-(--border)">
               <div className="flex items-center gap-3 px-4 py-3">
@@ -579,17 +350,19 @@ export function Ms365AttachDialog({
             <div>
               {/* Browser header */}
               <div className="flex items-center gap-2 border-b-2 border-(--border) px-3 py-2.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 rounded-none"
-                  disabled={history.length === 0 || isLoadingItems}
-                  onClick={() => void handleBack()}
-                >
-                  <ChevronLeft className="size-4" />
-                  <span className="sr-only">Back</span>
-                </Button>
+                {history.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 rounded-none"
+                    disabled={isLoadingItems}
+                    onClick={() => void handleBack()}
+                  >
+                    <ChevronLeft className="size-4" />
+                    <span className="sr-only">Back</span>
+                  </Button>
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-(--ink)">
                     {activeLocation?.label ?? "Microsoft 365 Browser"}
@@ -636,9 +409,14 @@ export function Ms365AttachDialog({
                       No locations configured
                     </p>
                     <p className="max-w-xs text-xs text-(--ink-muted)">
-                      Use the Allowlist Helper above to resolve a SharePoint URL, then copy
-                      the JSON into{" "}
-                      <code className="font-mono">MS365_ALLOWED_LOCATIONS_JSON</code>.
+                      Add a SharePoint location first at{" "}
+                      <a
+                        href="/ms365/allowlist"
+                        className="font-medium underline underline-offset-4"
+                      >
+                        /ms365/allowlist
+                      </a>
+                      .
                     </p>
                   </div>
                 ) : null}
@@ -751,6 +529,14 @@ export function Ms365AttachDialog({
                 onClick={() => setOpen(false)}
               >
                 Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="agent-btn rounded-none border-2 shadow-none"
+                asChild
+              >
+                <Link href="/ms365/allowlist">Add location</Link>
               </Button>
               <Button
                 type="button"

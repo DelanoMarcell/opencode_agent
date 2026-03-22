@@ -158,12 +158,6 @@ type PendingSidebarSession = {
 
 type FilesDialogScope = "session" | "matter";
 
-type QueuedFilesUpload = {
-  id: number;
-  scope: FilesDialogScope;
-  files: Array<File>;
-};
-
 function buildFilesApiEndpoint(scope: FilesDialogScope, resourceId: string) {
   return scope === "matter"
     ? `/api/matters/${encodeURIComponent(resourceId)}/files`
@@ -403,7 +397,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [ms365Attachments, setMs365Attachments] = useState<Array<Ms365AttachmentSelection>>([]);
   const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
-  const [queuedFilesUpload, setQueuedFilesUpload] = useState<QueuedFilesUpload | null>(null);
   const [filesDialogRefreshToken, setFilesDialogRefreshToken] = useState(0);
   const [traceLines, setTraceLines] = useState<Array<string>>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -2208,30 +2201,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setIsFilesDialogOpen(true);
   }, []);
 
-  const handleLocalFilesSelected = useCallback(
-    (files: Array<File>) => {
-      const scope: FilesDialogScope = selectedMatterID ? "matter" : "session";
-      const resourceId = scope === "matter" ? selectedMatterID : selectedSessionID;
-
-      if (!resourceId) {
-        setErrorText(
-          scope === "matter"
-            ? "Open a matter folder before uploading files into it."
-            : "Open a chat session before uploading files into it."
-        );
-        return;
-      }
-
-      setQueuedFilesUpload({
-        id: Date.now(),
-        scope,
-        files,
-      });
-      setIsFilesDialogOpen(true);
-    },
-    [selectedMatterID, selectedSessionID]
-  );
-
   const handleLocalFilesUpload = useCallback(
     async (
       files: Array<File>,
@@ -2631,7 +2600,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
     setIsFilesDialogOpen(false);
-    setQueuedFilesUpload(null);
     pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
     setIsLoadingSelectedSession(
@@ -3120,7 +3088,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setMs365Attachments([]);
       setIsFilesDialogOpen(false);
       setIsUploadingFiles(false);
-      setQueuedFilesUpload(null);
       setTraceLines([]);
       setErrorText(null);
       setPendingQuestions([]);
@@ -3365,8 +3332,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ) : null}
 
           <AgentComposer
-            canUploadFiles={Boolean(currentFilesResourceId)}
             composerPlaceholder={composerPlaceholder}
+            canManageFiles={Boolean(currentFilesResourceId)}
             contextBreakdownRows={contextBreakdownRows}
             contextUsageText={contextUsageText}
             filesScopeLabel={activeFilesScope}
@@ -3374,15 +3341,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             isBusy={isBusy}
             isMatterSelectionRequired={isMatterSelectionRequired}
             isLoadingSelectedSession={isLoadingSelectedSession}
-            isUploadingFiles={isUploadingFiles}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
             ms365Attachments={ms365Attachments}
             onInputTextChange={setInputText}
             currentFilesSummary={currentFilesSummary}
-            onLocalFilesSelected={handleLocalFilesSelected}
             onOpenFiles={handleOpenFiles}
-            onMs365AttachmentsAdd={handleMs365AttachmentsAdd}
             onMs365AttachmentRemove={handleMs365AttachmentRemove}
             onKeyDown={handleComposerKeyDown}
             onSend={() => void sendPrompt()}
@@ -3409,14 +3373,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               refreshDialog: false,
             })
           }
-          queuedUploadRequest={queuedFilesUpload}
           open={isFilesDialogOpen}
           scope={activeFilesScope}
           resourceId={currentFilesResourceId}
           onOpenChange={setIsFilesDialogOpen}
-          onQueuedUploadHandled={(requestId) => {
-            setQueuedFilesUpload((current) => (current?.id === requestId ? null : current));
-          }}
+          onMs365AttachmentsAdd={handleMs365AttachmentsAdd}
           onSummaryChange={handleFilesSummaryChange}
           refreshToken={filesDialogRefreshToken}
         />
