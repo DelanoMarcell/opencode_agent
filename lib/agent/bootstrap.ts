@@ -4,9 +4,12 @@ import mongoose from "mongoose";
 import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
 import { Matter } from "@/lib/models/matter";
+import { MatterFile } from "@/lib/models/matter-file";
 import { MatterMember } from "@/lib/models/matter-member";
 import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
+import { SessionFile } from "@/lib/models/session-file";
+import type { StoredFileSummary } from "@/lib/files/types";
 import { fetchOpenCodeBootstrap } from "@/lib/agent/opencode-server";
 import type {
   AgentBootstrap,
@@ -15,6 +18,8 @@ import type {
   AgentBootstrapUser,
   AgentWorkspaceMode,
 } from "@/lib/agent/types";
+import { buildMatterFileSummary } from "@/lib/matter-files/server";
+import { buildSessionFileSummary } from "@/lib/session-files/server";
 
 type BuildWorkspaceBootstrapOptions = {
   initialMatterId?: string;
@@ -24,7 +29,9 @@ type BuildWorkspaceBootstrapOptions = {
 
 type LoadedAgentWorkspaceData = {
   matters: Array<AgentBootstrapMatter>;
+  matterFileSummaryByMatterId: Record<string, StoredFileSummary>;
   matterSessionIdsByMatterId: Record<string, string[]>;
+  sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary>;
   sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord>;
 };
 
@@ -57,8 +64,32 @@ async function loadAccessibleAgentWorkspaceData(
     OpencodeSession.find({ organisationId: organisationObjectId }).sort({ createdAt: -1 }).lean(),
     MatterSession.find({ matterId: { $in: accessibleMatterIds } }).lean(),
   ]);
+  const rawSessionIds = sessionRecordDocs.map((sessionRecord) => sessionRecord.sessionId);
+  const [sessionFileDocs, matterFileDocs] = await Promise.all([
+    rawSessionIds.length > 0
+      ? SessionFile.find({
+          organisationId: organisationObjectId,
+          rawSessionId: { $in: rawSessionIds },
+        })
+          .select({ rawSessionId: 1 })
+          .lean()
+      : Promise.resolve([]),
+    accessibleMatterIds.length > 0
+      ? MatterFile.find({
+          organisationId: organisationObjectId,
+          matterId: { $in: accessibleMatterIds },
+        })
+          .select({ matterId: 1 })
+          .lean()
+      : Promise.resolve([]),
+  ]);
 
   const accessibleMatterIdSet = new Set(accessibleMatterIds);
+  const matterFileSummaryByMatterId: Record<string, StoredFileSummary> = {};
+  const matterSessionIdsByMatterId: Record<string, string[]> = {};
+  const sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary> = {};
+
+  const sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord> = {};
 
   const matters: Array<AgentBootstrapMatter> = matterDocs.map((matter) => ({
     id: matter._id.toString(),
@@ -73,8 +104,29 @@ async function loadAccessibleAgentWorkspaceData(
     matterSessionDocs.map((assignment) => [assignment.opencodeSessionId.toString(), assignment])
   );
 
-  const sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord> = {};
-  const matterSessionIdsByMatterId: Record<string, string[]> = {};
+  const sessionFileDocsByRawSessionId = new Map<
+    string,
+    Array<(typeof sessionFileDocs)[number]>
+  >();
+  for (const sessionFile of sessionFileDocs) {
+    const current = sessionFileDocsByRawSessionId.get(sessionFile.rawSessionId) ?? [];
+    current.push(sessionFile);
+    sessionFileDocsByRawSessionId.set(sessionFile.rawSessionId, current);
+  }
+
+  const matterFileDocsByMatterId = new Map<string, Array<(typeof matterFileDocs)[number]>>();
+  for (const matterFile of matterFileDocs) {
+    const matterId = matterFile.matterId.toString();
+    const current = matterFileDocsByMatterId.get(matterId) ?? [];
+    current.push(matterFile);
+    matterFileDocsByMatterId.set(matterId, current);
+  }
+
+  for (const matter of matterDocs) {
+    matterFileSummaryByMatterId[matter._id.toString()] = buildMatterFileSummary(
+      matterFileDocsByMatterId.get(matter._id.toString()) ?? []
+    );
+  }
 
   for (const sessionRecord of sessionRecordDocs) {
     const sessionRecordId = sessionRecord._id.toString();
@@ -99,11 +151,16 @@ async function loadAccessibleAgentWorkspaceData(
       matterId: assignment?.matterId?.toString(),
       addedByUserId: assignment?.addedByUserId?.toString(),
     };
+    sessionFileSummaryByRawSessionId[sessionRecord.sessionId] = buildSessionFileSummary(
+      sessionFileDocsByRawSessionId.get(sessionRecord.sessionId) ?? []
+    );
   }
 
   return {
     matters,
+    matterFileSummaryByMatterId,
     matterSessionIdsByMatterId,
+    sessionFileSummaryByRawSessionId,
     sessionRecordsByRawSessionId,
   };
 }
@@ -111,13 +168,21 @@ async function loadAccessibleAgentWorkspaceData(
 function buildChatsWorkspaceData(
   data: LoadedAgentWorkspaceData
 ): LoadedAgentWorkspaceData {
-  const sessionRecordsByRawSessionId = Object.fromEntries(
+  const sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord> = Object.fromEntries(
     Object.entries(data.sessionRecordsByRawSessionId).filter(([, sessionRecord]) => !sessionRecord.matterId)
+  );
+  const visibleRawSessionIds = new Set(Object.keys(sessionRecordsByRawSessionId));
+  const sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary> = Object.fromEntries(
+    Object.entries(data.sessionFileSummaryByRawSessionId).filter(([rawSessionId]) =>
+      visibleRawSessionIds.has(rawSessionId)
+    )
   );
 
   return {
     matters: [],
+    matterFileSummaryByMatterId: {},
     matterSessionIdsByMatterId: {},
+    sessionFileSummaryByRawSessionId,
     sessionRecordsByRawSessionId,
   };
 }
@@ -125,13 +190,21 @@ function buildChatsWorkspaceData(
 function buildMattersWorkspaceData(
   data: LoadedAgentWorkspaceData
 ): LoadedAgentWorkspaceData {
-  const sessionRecordsByRawSessionId = Object.fromEntries(
+  const sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord> = Object.fromEntries(
     Object.entries(data.sessionRecordsByRawSessionId).filter(([, sessionRecord]) => Boolean(sessionRecord.matterId))
+  );
+  const visibleRawSessionIds = new Set(Object.keys(sessionRecordsByRawSessionId));
+  const sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary> = Object.fromEntries(
+    Object.entries(data.sessionFileSummaryByRawSessionId).filter(([rawSessionId]) =>
+      visibleRawSessionIds.has(rawSessionId)
+    )
   );
 
   return {
     matters: data.matters,
+    matterFileSummaryByMatterId: data.matterFileSummaryByMatterId,
     matterSessionIdsByMatterId: data.matterSessionIdsByMatterId,
+    sessionFileSummaryByRawSessionId,
     sessionRecordsByRawSessionId,
   };
 }
@@ -158,7 +231,9 @@ async function buildWorkspaceBootstrap(
     availableSessions: openCodeBootstrap.availableSessions,
     availableSessionsLoaded: openCodeBootstrap.availableSessionsLoaded,
     modelCatalog: openCodeBootstrap.modelCatalog,
+    matterFileSummaryByMatterId: workspaceData.matterFileSummaryByMatterId,
     matterSessionIdsByMatterId: workspaceData.matterSessionIdsByMatterId,
+    sessionFileSummaryByRawSessionId: workspaceData.sessionFileSummaryByRawSessionId,
     sessionRecordsByRawSessionId: workspaceData.sessionRecordsByRawSessionId,
     initialSessionSnapshot: openCodeBootstrap.initialSessionSnapshot,
     initialMatterId: options.initialMatterId,

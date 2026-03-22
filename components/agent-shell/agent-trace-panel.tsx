@@ -4,7 +4,6 @@ import { type ChangeEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 type AgentTracePanelProps = {
@@ -47,12 +46,12 @@ export function AgentTracePanel({
             >
               Base URL
             </label>
-            <Input
+            <input
               id="trace-base-url"
               value={baseUrl}
               onChange={(event: ChangeEvent<HTMLInputElement>) => onBaseUrlChange(event.target.value)}
               disabled={!canEditBaseUrl}
-              className="agent-field h-8 rounded-none border-2 px-2 text-xs shadow-none"
+              className="agent-field h-8 w-full border-2 px-2 text-xs outline-none"
             />
           </div>
           <div className="space-y-1">
@@ -62,11 +61,11 @@ export function AgentTracePanel({
             >
               Port
             </label>
-            <Input
+            <input
               id="trace-base-port"
               value={basePort}
               readOnly
-              className="agent-field h-8 rounded-none border-2 px-2 text-xs shadow-none"
+              className="agent-field h-8 w-full border-2 px-2 text-xs outline-none"
             />
           </div>
         </div>

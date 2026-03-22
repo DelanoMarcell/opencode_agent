@@ -19,6 +19,7 @@ import {
 
 import { AgentComposer } from "@/components/agent-shell/agent-composer";
 import { AgentInteractivePanel } from "@/components/agent-shell/agent-interactive-panel";
+import { SessionFilesDialog } from "@/components/agent-shell/session-files-dialog";
 import { MatterOverviewEmptyState } from "@/components/agent-shell/matter-overview-empty-state";
 import { MattersWorkspaceEmptyState } from "@/components/agent-shell/matters-workspace-empty-state";
 import { AgentSessionHeader } from "@/components/agent-shell/agent-session-header";
@@ -90,6 +91,11 @@ import type {
   AgentBootstrapSessionRecord,
 } from "@/lib/agent/types";
 import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
+import type {
+  StoredFileListItem,
+  StoredFileSummary,
+  StoredFileUploadResult,
+} from "@/lib/files/types";
 
 const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_OPENCODE_BASE_URL ?? "http://localhost:4096";
@@ -149,6 +155,20 @@ type PendingSidebarSession = {
   updated: number;
   created: number;
 };
+
+type FilesDialogScope = "session" | "matter";
+
+type QueuedFilesUpload = {
+  id: number;
+  scope: FilesDialogScope;
+  files: Array<File>;
+};
+
+function buildFilesApiEndpoint(scope: FilesDialogScope, resourceId: string) {
+  return scope === "matter"
+    ? `/api/matters/${encodeURIComponent(resourceId)}/files`
+    : `/api/opencode-sessions/${encodeURIComponent(resourceId)}/files`;
+}
 
 function buildChatRoute(sessionRecordID: string, matterID?: string) {
   return matterID
@@ -354,6 +374,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [availableSessions, setAvailableSessions] = useState<Array<SessionOption>>(
     bootstrap.availableSessions
   );
+  const [matterFileSummaryByMatterId, setMatterFileSummaryByMatterId] = useState(
+    bootstrap.matterFileSummaryByMatterId
+  );
+  const [sessionFileSummaryByRawSessionId, setSessionFileSummaryByRawSessionId] = useState(
+    bootstrap.sessionFileSummaryByRawSessionId
+  );
   const [selectedSessionID, setSelectedSessionID] = useState(bootstrap.initialRawSessionId ?? "");
   const [selectedSessionRecordID, setSelectedSessionRecordID] = useState(
     bootstrap.initialSessionRecordId ?? ""
@@ -375,6 +401,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
   const [ms365Attachments, setMs365Attachments] = useState<Array<Ms365AttachmentSelection>>([]);
+  const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [queuedFilesUpload, setQueuedFilesUpload] = useState<QueuedFilesUpload | null>(null);
+  const [filesDialogRefreshToken, setFilesDialogRefreshToken] = useState(0);
   const [traceLines, setTraceLines] = useState<Array<string>>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<Array<QuestionRequest>>([]);
@@ -2148,6 +2178,134 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     }
   }, []);
 
+  const syncSessionFileSummary = useCallback((rawSessionId: string, summary: StoredFileSummary) => {
+    setSessionFileSummaryByRawSessionId((current) => ({
+      ...current,
+      [rawSessionId]: summary,
+    }));
+  }, []);
+
+  const syncMatterFileSummary = useCallback((matterId: string, summary: StoredFileSummary) => {
+    setMatterFileSummaryByMatterId((current) => ({
+      ...current,
+      [matterId]: summary,
+    }));
+  }, []);
+
+  const handleFilesSummaryChange = useCallback(
+    (scope: FilesDialogScope, resourceId: string, summary: StoredFileSummary) => {
+      if (scope === "matter") {
+        syncMatterFileSummary(resourceId, summary);
+        return;
+      }
+
+      syncSessionFileSummary(resourceId, summary);
+    },
+    [syncMatterFileSummary, syncSessionFileSummary]
+  );
+
+  const handleOpenFiles = useCallback(() => {
+    setIsFilesDialogOpen(true);
+  }, []);
+
+  const handleLocalFilesSelected = useCallback(
+    (files: Array<File>) => {
+      const scope: FilesDialogScope = selectedMatterID ? "matter" : "session";
+      const resourceId = scope === "matter" ? selectedMatterID : selectedSessionID;
+
+      if (!resourceId) {
+        setErrorText(
+          scope === "matter"
+            ? "Open a matter folder before uploading files into it."
+            : "Open a chat session before uploading files into it."
+        );
+        return;
+      }
+
+      setQueuedFilesUpload({
+        id: Date.now(),
+        scope,
+        files,
+      });
+      setIsFilesDialogOpen(true);
+    },
+    [selectedMatterID, selectedSessionID]
+  );
+
+  const handleLocalFilesUpload = useCallback(
+    async (
+      files: Array<File>,
+      options?: {
+        openDialog?: boolean;
+        refreshDialog?: boolean;
+      }
+    ) => {
+      const scope: FilesDialogScope = selectedMatterID ? "matter" : "session";
+      const resourceId = scope === "matter" ? selectedMatterID : selectedSessionID;
+
+      if (!resourceId) {
+        setErrorText(
+          scope === "matter"
+            ? "Open a matter folder before uploading files into it."
+            : "Open a chat session before uploading files into it."
+        );
+        return null;
+      }
+
+      const shouldOpenDialog = options?.openDialog ?? true;
+      const shouldRefreshDialog = options?.refreshDialog ?? true;
+
+      setIsUploadingFiles(true);
+      setErrorText(null);
+
+      try {
+        const formData = new FormData();
+        for (const file of files) {
+          formData.append("files", file);
+        }
+
+        const response = await fetch(buildFilesApiEndpoint(scope, resourceId), {
+          method: "POST",
+          body: formData,
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              files?: Array<StoredFileListItem>;
+              summary?: StoredFileSummary;
+              uploadResults?: Array<StoredFileUploadResult>;
+              error?: string;
+            }
+          | null;
+
+        if (!response.ok || !payload?.summary || !payload?.files) {
+          throw new Error(payload?.error ?? `Failed to upload ${scope} files`);
+        }
+
+        handleFilesSummaryChange(scope, resourceId, payload.summary);
+        if (shouldRefreshDialog) {
+          setFilesDialogRefreshToken((current) => current + 1);
+        }
+        if (shouldOpenDialog) {
+          setIsFilesDialogOpen(true);
+        }
+        appendTrace(`${scope} files uploaded: ${files.length}`);
+        return {
+          files: payload.files,
+          summary: payload.summary,
+          uploadResults: payload.uploadResults ?? [],
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        setErrorText(message);
+        appendTrace(`${scope} file upload error: ${message}`);
+        return null;
+      } finally {
+        setIsUploadingFiles(false);
+      }
+    },
+    [appendTrace, handleFilesSummaryChange, selectedMatterID, selectedSessionID]
+  );
+
   const assignSessionRecordToMatter = useCallback(
     async (sessionRecord: AgentBootstrapSessionRecord, matterID: string) => {
       const response = await fetch(`/api/matters/${matterID}/sessions`, {
@@ -2181,7 +2339,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const registerSessionRecord = useCallback(
-    async (rawSessionID: string, title?: string, matterID?: string) => {
+    async (rawSessionID: string, matterID?: string) => {
       const existingSessionRecord = sessionRecordsByRawSessionId[rawSessionID];
       if (existingSessionRecord) {
         if (matterID && existingSessionRecord.matterId !== matterID) {
@@ -2207,7 +2365,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           },
           body: JSON.stringify({
             sessionId: rawSessionID,
-            title,
           }),
         });
 
@@ -2468,9 +2625,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setSelectedSessionRecordID(bootstrap.initialSessionRecordId ?? "");
     setSelectedSessionID(bootstrap.initialRawSessionId ?? "");
     setMatters(bootstrap.matters);
+    setMatterFileSummaryByMatterId(bootstrap.matterFileSummaryByMatterId);
+    setSessionFileSummaryByRawSessionId(bootstrap.sessionFileSummaryByRawSessionId);
     setSessionRecordsByRawSessionId(bootstrap.sessionRecordsByRawSessionId);
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
+    setIsFilesDialogOpen(false);
+    setQueuedFilesUpload(null);
     pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
     setIsLoadingSelectedSession(
@@ -2604,7 +2765,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     const createdSession = sessionResult.data;
     const sessionRecord = await registerSessionRecord(
       createdSession.id,
-      createdSession.title?.trim() || undefined,
       selectedMatterID || undefined
     );
     resetSessionTokenTracking();
@@ -2958,6 +3118,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setTimeline([]);
       setInputText("");
       setMs365Attachments([]);
+      setIsFilesDialogOpen(false);
+      setIsUploadingFiles(false);
+      setQueuedFilesUpload(null);
       setTraceLines([]);
       setErrorText(null);
       setPendingQuestions([]);
@@ -3097,6 +3260,23 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const activeMatter = selectedMatterID
     ? matters.find((matter) => matter.id === selectedMatterID)
     : undefined;
+  const activeFilesScope: FilesDialogScope = selectedMatterID ? "matter" : "session";
+  const currentFilesResourceId =
+    activeFilesScope === "matter" ? selectedMatterID || undefined : selectedSessionID || undefined;
+  const currentFilesSummary =
+    activeFilesScope === "matter"
+      ? selectedMatterID
+        ? matterFileSummaryByMatterId[selectedMatterID] ?? {
+            fileCount: 0,
+            hasFiles: false,
+          }
+        : undefined
+      : selectedSessionID
+        ? sessionFileSummaryByRawSessionId[selectedSessionID] ?? {
+            fileCount: 0,
+            hasFiles: false,
+          }
+        : undefined;
   const composerPlaceholder = isMatterSelectionRequired
     ? "Select a matter folder to start a chat..."
     : workspaceMode === "matters" && activeMatter && !selectedSessionID
@@ -3185,17 +3365,23 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ) : null}
 
           <AgentComposer
+            canUploadFiles={Boolean(currentFilesResourceId)}
             composerPlaceholder={composerPlaceholder}
             contextBreakdownRows={contextBreakdownRows}
             contextUsageText={contextUsageText}
+            filesScopeLabel={activeFilesScope}
             inputText={inputText}
             isBusy={isBusy}
             isMatterSelectionRequired={isMatterSelectionRequired}
             isLoadingSelectedSession={isLoadingSelectedSession}
+            isUploadingFiles={isUploadingFiles}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
             ms365Attachments={ms365Attachments}
             onInputTextChange={setInputText}
+            currentFilesSummary={currentFilesSummary}
+            onLocalFilesSelected={handleLocalFilesSelected}
+            onOpenFiles={handleOpenFiles}
             onMs365AttachmentsAdd={handleMs365AttachmentsAdd}
             onMs365AttachmentRemove={handleMs365AttachmentRemove}
             onKeyDown={handleComposerKeyDown}
@@ -3213,6 +3399,27 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             textareaRef={composerTextareaRef}
           />
         </Card>
+
+        <SessionFilesDialog
+          canUploadFiles={Boolean(currentFilesResourceId)}
+          isUploadingFiles={isUploadingFiles}
+          onAddFiles={(files) =>
+            handleLocalFilesUpload(files, {
+              openDialog: false,
+              refreshDialog: false,
+            })
+          }
+          queuedUploadRequest={queuedFilesUpload}
+          open={isFilesDialogOpen}
+          scope={activeFilesScope}
+          resourceId={currentFilesResourceId}
+          onOpenChange={setIsFilesDialogOpen}
+          onQueuedUploadHandled={(requestId) => {
+            setQueuedFilesUpload((current) => (current?.id === requestId ? null : current));
+          }}
+          onSummaryChange={handleFilesSummaryChange}
+          refreshToken={filesDialogRefreshToken}
+        />
 
         {showTrace ? (
           <AgentTracePanel

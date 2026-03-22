@@ -28,6 +28,7 @@ download/
 # misc
 .DS_Store
 *.pem
+.agent/session-files/
 
 # debug
 npm-debug.log*

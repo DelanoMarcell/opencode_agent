@@ -3,6 +3,7 @@ import type {
   SessionOption,
   StoredMessage,
 } from "@/lib/agent-runtime/types";
+import type { StoredFileSummary } from "@/lib/files/types";
 
 export type AgentWorkspaceMode = "chats" | "matters";
 
@@ -53,7 +54,9 @@ export type AgentBootstrap = {
   availableSessions: Array<SessionOption>;
   availableSessionsLoaded: boolean;
   modelCatalog: AgentBootstrapModelCatalog;
+  matterFileSummaryByMatterId: Record<string, StoredFileSummary>;
   matterSessionIdsByMatterId: Record<string, string[]>;
+  sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary>;
   sessionRecordsByRawSessionId: Record<string, AgentBootstrapSessionRecord>;
   initialSessionSnapshot?: AgentBootstrapSessionSnapshot;
   initialMatterId?: string;

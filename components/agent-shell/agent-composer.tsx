@@ -1,12 +1,18 @@
 "use client";
 
-import type { KeyboardEvent, RefObject } from "react";
+import { useRef, useState, type ChangeEvent, type KeyboardEvent, type RefObject } from "react";
 import { Paperclip, X } from "lucide-react";
 
 import { AgentComposerLoader } from "@/components/loaders/agent-composer-loader";
 import { Ms365AttachDialog } from "@/components/agent-shell/ms365-attach-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -24,6 +30,7 @@ import {
 } from "@/components/ui/tooltip";
 import { formatUsdAmount } from "@/lib/agent-runtime/helpers";
 import type { CostFormulaGroup, TokenUsageTotals } from "@/lib/agent-runtime/types";
+import type { StoredFileSummary } from "@/lib/files/types";
 import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 type StatRow = {
@@ -35,14 +42,20 @@ type AgentComposerProps = {
   composerPlaceholder: string;
   contextBreakdownRows: Array<StatRow>;
   contextUsageText: string;
+  filesScopeLabel: "session" | "matter";
   inputText: string;
   isBusy: boolean;
   isMatterSelectionRequired: boolean;
   isLoadingSelectedSession: boolean;
+  isUploadingFiles: boolean;
   latestContextUsage: TokenUsageTotals | null;
   modelLabel: string;
   ms365Attachments: Array<Ms365AttachmentSelection>;
+  canUploadFiles: boolean;
+  currentFilesSummary?: StoredFileSummary;
   onInputTextChange: (value: string) => void;
+  onLocalFilesSelected: (files: Array<File>) => void;
+  onOpenFiles: () => void;
   onMs365AttachmentsAdd: (files: Array<Ms365AttachmentSelection>) => void;
   onMs365AttachmentRemove: (key: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -59,14 +72,20 @@ export function AgentComposer({
   composerPlaceholder,
   contextBreakdownRows,
   contextUsageText,
+  filesScopeLabel,
   inputText,
   isBusy,
   isMatterSelectionRequired,
   isLoadingSelectedSession,
+  isUploadingFiles,
   latestContextUsage,
   modelLabel,
   ms365Attachments,
+  canUploadFiles,
+  currentFilesSummary,
   onInputTextChange,
+  onLocalFilesSelected,
+  onOpenFiles,
   onMs365AttachmentsAdd,
   onMs365AttachmentRemove,
   onKeyDown,
@@ -78,16 +97,50 @@ export function AgentComposer({
   sessionTotalsRows,
   textareaRef,
 }: AgentComposerProps) {
+  const [isMs365DialogOpen, setIsMs365DialogOpen] = useState(false);
+  const localFileInputRef = useRef<HTMLInputElement | null>(null);
   const isComposerDisabled = isBusy || isLoadingSelectedSession || isMatterSelectionRequired;
   const helperText = isMatterSelectionRequired
     ? "Select a matter folder before sending a message."
     : isBusy
       ? "Waiting for assistant response..."
       : "Press Enter to send, Shift+Enter for newline.";
+  const filesLabel = filesScopeLabel === "matter" ? "matter" : "session";
+
+  function handleOpenLocalFilePicker() {
+    if (isComposerDisabled || !canUploadFiles || isUploadingFiles) {
+      return;
+    }
+
+    localFileInputRef.current?.click();
+  }
+
+  function handleLocalFilesChosen(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+    if (files.length > 0) {
+      onLocalFilesSelected(files);
+    }
+    input.value = "";
+  }
 
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
       <div className="space-y-2">
+        <input
+          ref={localFileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleLocalFilesChosen}
+        />
+        <Ms365AttachDialog
+          disabled={isComposerDisabled}
+          onAttach={onMs365AttachmentsAdd}
+          open={isMs365DialogOpen}
+          onOpenChange={setIsMs365DialogOpen}
+          showTrigger={false}
+        />
         {ms365Attachments.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {ms365Attachments.map((attachment) => {
@@ -328,10 +381,56 @@ export function AgentComposer({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Ms365AttachDialog
-              disabled={isComposerDisabled}
-              onAttach={onMs365AttachmentsAdd}
-            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="agent-btn rounded-none border-2 shadow-none"
+                  disabled={isComposerDisabled}
+                >
+                  <Paperclip className="size-4" />
+                  Attach
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="agent-menu w-56 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+              >
+                <DropdownMenuItem
+                  className="agent-menu-item rounded-none py-2"
+                  disabled={!canUploadFiles || isUploadingFiles}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleOpenLocalFilePicker();
+                  }}
+                >
+                  {isUploadingFiles ? "Uploading…" : "Upload from your device"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="agent-menu-item rounded-none py-2"
+                  disabled={!canUploadFiles}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onOpenFiles();
+                  }}
+                >
+                  {`Files from this ${filesLabel}`}
+                  {currentFilesSummary?.fileCount
+                    ? ` (${currentFilesSummary.fileCount})`
+                    : ""}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="agent-menu-item rounded-none py-2"
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setIsMs365DialogOpen(true);
+                  }}
+                >
+                  From Microsoft 365
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               type="button"
               onClick={onSend}

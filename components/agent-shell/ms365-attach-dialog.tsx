@@ -37,6 +37,9 @@ import type {
 type Ms365AttachDialogProps = {
   disabled?: boolean;
   onAttach: (files: Array<Ms365AttachmentSelection>) => void;
+  onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  showTrigger?: boolean;
 };
 
 type BrowseResponse = {
@@ -84,8 +87,11 @@ function formatItemMeta(item: Ms365BrowserItem) {
 export function Ms365AttachDialog({
   disabled = false,
   onAttach,
+  onOpenChange,
+  open: controlledOpen,
+  showTrigger = true,
 }: Ms365AttachDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [locations, setLocations] = useState<Array<Ms365LocationSummary>>([]);
   const [activeLocationId, setActiveLocationId] = useState<string>("");
   const [history, setHistory] = useState<Array<Ms365BrowserItem>>([]);
@@ -110,6 +116,17 @@ export function Ms365AttachDialog({
   const activeLocation = useMemo(
     () => locations.find((location) => location.id === activeLocationId) ?? null,
     [activeLocationId, locations]
+  );
+  const open = controlledOpen ?? internalOpen;
+
+  const setOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) {
+        setInternalOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange]
   );
 
   const selectedFiles = useMemo(() => Object.values(selectedByKey), [selectedByKey]);
@@ -340,16 +357,18 @@ export function Ms365AttachDialog({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        className="agent-btn rounded-none border-2 shadow-none"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
-        <Paperclip className="size-4" />
-        Attach MS365
-      </Button>
+      {showTrigger ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="agent-btn rounded-none border-2 shadow-none"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+        >
+          <Paperclip className="size-4" />
+          Attach MS365
+        </Button>
+      ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
