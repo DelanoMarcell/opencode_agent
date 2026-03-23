@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type KeyboardEvent, type RefObject } from "react";
-import { Paperclip } from "lucide-react";
+import { FileText, Paperclip, X } from "lucide-react";
 
 import { AgentComposerLoader } from "@/components/loaders/agent-composer-loader";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,13 @@ type StatRow = {
   value: string;
 };
 
+type ComposerAttachedFile = {
+  fileId: string;
+  originalName: string;
+};
+
 type AgentComposerProps = {
+  attachedFiles: Array<ComposerAttachedFile>;
   composerPlaceholder: string;
   contextBreakdownRows: Array<StatRow>;
   contextUsageText: string;
@@ -48,9 +54,11 @@ type AgentComposerProps = {
   modelLabel: string;
   canManageFiles: boolean;
   currentFilesSummary?: StoredFileSummary;
+  onClearAttachedFiles: () => void;
   onInputTextChange: (value: string) => void;
   onOpenFiles: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onRemoveAttachedFile: (fileId: string) => void;
   onSend: () => void;
   sendDisabled: boolean;
   sessionCostFormulaGroups: Array<CostFormulaGroup>;
@@ -61,6 +69,7 @@ type AgentComposerProps = {
 };
 
 export function AgentComposer({
+  attachedFiles,
   composerPlaceholder,
   contextBreakdownRows,
   contextUsageText,
@@ -73,9 +82,11 @@ export function AgentComposer({
   modelLabel,
   canManageFiles,
   currentFilesSummary,
+  onClearAttachedFiles,
   onInputTextChange,
   onOpenFiles,
   onKeyDown,
+  onRemoveAttachedFile,
   onSend,
   sendDisabled,
   sessionCostFormulaGroups,
@@ -92,10 +103,55 @@ export function AgentComposer({
       ? "Waiting for assistant response..."
       : "Press Enter to send, Shift+Enter for newline.";
   const filesLabel = filesScopeLabel === "matter" ? "Matter files" : "Session files";
+  const visibleAttachedFiles = attachedFiles.slice(0, 3);
+  const hiddenAttachedFileCount = Math.max(0, attachedFiles.length - visibleAttachedFiles.length);
 
   return (
     <div className="agent-composer min-w-0 border-t-2 px-4 py-3">
       <div className="space-y-2">
+        {attachedFiles.length > 0 ? (
+          <div className="rounded-none border-2 border-(--border) bg-(--paper-3) px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                <Paperclip className="size-3.5" />
+                Attached for next send
+              </div>
+              <button
+                type="button"
+                className="text-[11px] font-medium text-(--ink-soft) underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                onClick={onClearAttachedFiles}
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {visibleAttachedFiles.map((file) => (
+                <div
+                  key={file.fileId}
+                  className="inline-flex max-w-full items-center gap-1.5 border-2 border-(--border) bg-(--surface) px-2 py-1 text-xs"
+                >
+                  <FileText className="size-3.5 shrink-0 text-(--ink-soft)" />
+                  <span className="max-w-[12rem] truncate" title={file.originalName}>
+                    {file.originalName}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center justify-center text-(--ink-soft) transition-colors hover:text-foreground"
+                    aria-label={`Remove ${file.originalName}`}
+                    onClick={() => onRemoveAttachedFile(file.fileId)}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+              {hiddenAttachedFileCount > 0 ? (
+                <div className="inline-flex items-center border-2 border-dashed border-(--border) px-2 py-1 text-xs text-(--ink-soft)">
+                  … and {hiddenAttachedFileCount} more
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <Textarea
           ref={textareaRef}
           value={inputText}

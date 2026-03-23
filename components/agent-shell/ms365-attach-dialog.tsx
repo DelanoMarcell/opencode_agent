@@ -4,6 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Check,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   FileText,
   Folder,
@@ -80,6 +82,10 @@ export function Ms365AttachDialog({
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [selectedByKey, setSelectedByKey] = useState<Record<string, Ms365AttachmentSelection>>({});
+  // Whether the "review selected files" panel/overlay is open
+  const [showReview, setShowReview] = useState(false);
+  // Mobile-only: whether the location dropdown is expanded
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
 
   const activeLocation = useMemo(
     () => locations.find((loc) => loc.id === activeLocationId) ?? null,
@@ -97,6 +103,11 @@ export function Ms365AttachDialog({
 
   const selectedFiles = useMemo(() => Object.values(selectedByKey), [selectedByKey]);
   const hasLocations = locations.length > 0;
+
+  // Auto-close review panel when all selections are cleared
+  useEffect(() => {
+    if (selectedFiles.length === 0) setShowReview(false);
+  }, [selectedFiles.length]);
 
   // Files only (no folders) in the current view — used for select-all
   const filesInView = useMemo(() => items.filter((i) => i.kind === "file"), [items]);
@@ -184,6 +195,7 @@ export function Ms365AttachDialog({
 
   const handleLocationSelect = useCallback(
     async (locationId: string) => {
+      setShowLocationDropdown(false);
       if (locationId === activeLocationId) return;
       setActiveLocationId(locationId);
       await loadItems(locationId);
@@ -237,7 +249,6 @@ export function Ms365AttachDialog({
   const handleSelectAll = useCallback(() => {
     if (!activeLocation) return;
     if (allFilesSelected) {
-      // Deselect all files in current view
       setSelectedByKey((current) => {
         const next = { ...current };
         for (const item of filesInView) {
@@ -246,7 +257,6 @@ export function Ms365AttachDialog({
         return next;
       });
     } else {
-      // Select all files in current view
       setSelectedByKey((current) => {
         const next = { ...current };
         for (const item of filesInView) {
@@ -327,12 +337,10 @@ export function Ms365AttachDialog({
             </div>
           </DialogHeader>
 
-          {/* ── Body: stacked on mobile, side-by-side on sm+ ── */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
+          {/* ── Body ────────────────────────────────────────── */}
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
 
             {/* ── Locations panel ─────────────────────────────── */}
-            {/* On mobile: compact horizontal tab strip across full width  */}
-            {/* On sm+:    fixed-width vertical sidebar                    */}
             <div className="shrink-0 overflow-hidden border-b-2 border-(--border) sm:flex sm:w-52 sm:flex-col sm:border-b-0 sm:border-r-2">
               {/* Panel header */}
               <div className="flex items-center justify-between border-b-2 border-(--border) px-3 py-2">
@@ -355,8 +363,8 @@ export function Ms365AttachDialog({
                 </Button>
               </div>
 
-              {/* Mobile: horizontal scrollable tabs */}
-              <div className="flex overflow-x-auto sm:hidden">
+              {/* Mobile: compact dropdown selector */}
+              <div className="sm:hidden">
                 {isLoadingLocations ? (
                   <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-(--ink-soft)">
                     <Loader2 className="size-3.5 animate-spin" />
@@ -365,17 +373,43 @@ export function Ms365AttachDialog({
                 ) : locations.length === 0 ? (
                   <p className="px-3 py-2.5 text-xs text-(--ink-muted)">No locations.</p>
                 ) : (
-                  locations.map((location) => (
+                  <>
                     <button
-                      key={location.id}
                       type="button"
-                      onClick={() => void handleLocationSelect(location.id)}
-                      className={`shrink-0 px-4 py-2.5 ${locationBtnClass(location.id === activeLocationId)}`}
+                      onClick={() => setShowLocationDropdown((v) => !v)}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-sm text-(--ink) hover:bg-(--surface-hover)"
                     >
-                      <Folder className="size-3.5 shrink-0 opacity-70" />
-                      <span className="whitespace-nowrap">{location.label}</span>
+                      <Folder className="size-3.5 shrink-0 text-(--ink-soft)" />
+                      <span className="flex-1 truncate text-left font-medium">
+                        {activeLocation?.label ?? "Select location"}
+                      </span>
+                      <ChevronDown
+                        className={`size-3.5 shrink-0 text-(--ink-soft) transition-transform ${showLocationDropdown ? "rotate-180" : ""}`}
+                      />
                     </button>
-                  ))
+                    {showLocationDropdown ? (
+                      <div className="border-t-2 border-(--border)">
+                        {locations.map((location) => (
+                          <button
+                            key={location.id}
+                            type="button"
+                            onClick={() => void handleLocationSelect(location.id)}
+                            className={`flex w-full items-center gap-2 px-4 py-2.5 text-sm ${
+                              location.id === activeLocationId
+                                ? "bg-(--brand) font-semibold text-(--brand-on)"
+                                : "text-(--ink) hover:bg-(--surface-hover)"
+                            }`}
+                          >
+                            <Folder className="size-3.5 shrink-0 opacity-70" />
+                            <span className="flex-1 truncate text-left">{location.label}</span>
+                            {location.id === activeLocationId ? (
+                              <Check className="size-3.5 shrink-0" />
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 )}
               </div>
 
@@ -456,12 +490,6 @@ export function Ms365AttachDialog({
                     Select a location to browse files.
                   </span>
                 ) : null}
-
-                {selectedFiles.length > 0 ? (
-                  <span className="ml-auto shrink-0 border-2 border-(--border) bg-(--surface-light) px-2 py-0.5 text-xs font-semibold text-(--ink)">
-                    {selectedFiles.length} selected
-                  </span>
-                ) : null}
               </div>
 
               {/* File list */}
@@ -499,9 +527,7 @@ export function Ms365AttachDialog({
                 {/* Items */}
                 {hasLocations && !isLoadingItems && items.length > 0 ? (
                   <>
-                    {/* Column headers
-                        Mobile:  Name | Modified | (chevron)
-                        Desktop: Name | Size | Modified | (chevron)        */}
+                    {/* Column headers */}
                     <div className="grid items-center gap-x-4 border-b-2 border-(--border) bg-(--paper-3) px-3 py-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.07em] text-(--ink-muted) grid-cols-[1fr_6.5rem_1.25rem] sm:grid-cols-[1fr_5.5rem_6.5rem_1.25rem]">
                       {/* Select-all checkbox + "Name" label */}
                       <div className="flex items-center gap-2.5">
@@ -608,32 +634,116 @@ export function Ms365AttachDialog({
                 ) : null}
               </ScrollArea>
             </div>
+
+            {/* ── Review panel: desktop right sidebar ─────────── */}
+            {showReview && selectedFiles.length > 0 ? (
+              <div className="hidden w-60 shrink-0 flex-col border-l-2 border-(--border) sm:flex">
+                <div className="flex shrink-0 items-center gap-2 border-b-2 border-(--border) px-3 py-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                    Selected ({selectedFiles.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedByKey({})}
+                    className="ml-auto text-xs text-(--ink-soft) underline-offset-2 hover:text-(--danger) hover:underline"
+                    title="Remove all selected files"
+                  >
+                    Clear all
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 shrink-0 rounded-none"
+                    onClick={() => setShowReview(false)}
+                    title="Collapse panel"
+                  >
+                    <ChevronRight className="size-3.5" />
+                    <span className="sr-only">Collapse</span>
+                  </Button>
+                </div>
+                <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:w-full">
+                  <div className="py-1">
+                    {selectedFiles.map((file) => (
+                      <div
+                        key={`${file.locationId}:${file.id}`}
+                        className="flex items-start gap-2 border-b border-(--border)/50 px-3 py-2"
+                      >
+                        <FileText className="mt-0.5 size-3.5 shrink-0 text-(--ink-soft)" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-(--ink)">{file.name}</p>
+                          <p className="truncate text-[0.65rem] text-(--ink-muted)">{file.locationLabel}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeselectFile(file)}
+                          className="mt-0.5 shrink-0 text-(--ink-soft) transition-colors hover:text-(--ink)"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            ) : null}
+
+            {/* ── Review overlay: mobile full-screen ──────────── */}
+            {showReview && selectedFiles.length > 0 ? (
+              <div className="absolute inset-0 z-10 flex flex-col bg-(--paper-2) sm:hidden">
+                <div className="flex shrink-0 items-center gap-2 border-b-2 border-(--border) px-3 py-2.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 rounded-none"
+                    onClick={() => setShowReview(false)}
+                    title="Back to browser"
+                  >
+                    <ChevronLeft className="size-4" />
+                    <span className="sr-only">Back</span>
+                  </Button>
+                  <span className="text-sm font-semibold text-(--ink)">
+                    Selected files ({selectedFiles.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedByKey({})}
+                    className="ml-auto text-xs text-(--ink-soft) underline-offset-2 hover:text-(--ink) hover:underline"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:w-full">
+                  {selectedFiles.map((file) => (
+                    <div
+                      key={`${file.locationId}:${file.id}`}
+                      className="flex items-center gap-3 border-b border-(--border)/50 px-4 py-3"
+                    >
+                      <FileText className="size-4 shrink-0 text-(--ink-soft)" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-(--ink)">{file.name}</p>
+                        <p className="text-xs text-(--ink-muted)">{file.locationLabel}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeselectFile(file)}
+                        className="shrink-0 text-(--ink-soft) transition-colors hover:text-(--ink)"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  ))}
+                </ScrollArea>
+              </div>
+            ) : null}
           </div>
 
           {/* ── Footer ──────────────────────────────────────── */}
-          <div className="shrink-0 border-t-2 border-(--border) bg-(--paper-3) px-5 py-3">
-            {selectedFiles.length > 0 ? (
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {selectedFiles.map((file) => (
-                  <span
-                    key={`${file.locationId}:${file.id}`}
-                    className="flex items-center gap-1.5 border-2 border-(--border) bg-(--surface-light) px-2 py-0.5 text-xs font-medium text-(--ink)"
-                  >
-                    <FileText className="size-3 shrink-0 text-(--ink-soft)" />
-                    <span className="max-w-48 truncate">{file.name}</span>
-                    <button
-                      type="button"
-                      className="ml-0.5 text-(--ink-soft) hover:text-(--ink)"
-                      onClick={() => handleDeselectFile(file)}
-                      aria-label={`Remove ${file.name}`}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="flex items-center justify-end gap-2">
+          <div className="shrink-0 border-t-2 border-(--border) bg-(--paper-3) px-4 py-3">
+            <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -642,9 +752,29 @@ export function Ms365AttachDialog({
               >
                 Cancel
               </Button>
+
+              {/* Review button — always visible, disabled when nothing selected */}
               <Button
                 type="button"
-                className="agent-btn-primary rounded-none border-2 shadow-none"
+                variant="outline"
+                className={`agent-btn rounded-none border-2 shadow-none ${
+                  showReview && selectedFiles.length > 0
+                    ? "border-(--brand) bg-(--brand) text-(--brand-on) hover:bg-(--brand)"
+                    : ""
+                }`}
+                disabled={selectedFiles.length === 0}
+                onClick={() => setShowReview((v) => !v)}
+                title={showReview ? "Hide selected files" : "Review selected files"}
+              >
+                <FileText className="size-4" />
+                {selectedFiles.length > 0
+                  ? `${selectedFiles.length} ${selectedFiles.length === 1 ? "file" : "files"} selected`
+                  : "0 selected"}
+              </Button>
+
+              <Button
+                type="button"
+                className="agent-btn-primary ml-auto rounded-none border-2 shadow-none"
                 disabled={selectedFiles.length === 0 || isUploading}
                 onClick={() => void handleUpload()}
               >

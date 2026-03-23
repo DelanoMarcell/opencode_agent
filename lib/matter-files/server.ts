@@ -5,10 +5,12 @@ import type { StoredFileListItem, StoredFileSummary } from "@/lib/files/types";
 import { Matter } from "@/lib/models/matter";
 import { MatterFile } from "@/lib/models/matter-file";
 import { MatterMember } from "@/lib/models/matter-member";
+import { toModelRelativeStoragePath } from "@/lib/session-files/storage";
 
 type SerializableMatterFile = {
   fileId: string;
   originalName: string;
+  relativePath: string;
   source?: "device" | "ms365";
   ms365LocationId?: string | null;
   ms365DriveId?: string | null;
@@ -27,6 +29,7 @@ export function serializeMatterFile(file: SerializableMatterFile): StoredFileLis
   return {
     fileId: file.fileId,
     originalName: file.originalName,
+    relativePath: toModelRelativeStoragePath(file.relativePath),
     source: file.source === "ms365" ? "ms365" : "device",
     ms365LocationId: file.ms365LocationId ?? undefined,
     ms365DriveId: file.ms365DriveId ?? undefined,

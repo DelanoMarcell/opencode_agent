@@ -2,12 +2,14 @@ import mongoose from "mongoose";
 
 import { OpencodeSession } from "@/lib/models/opencode-session";
 import { SessionFile } from "@/lib/models/session-file";
+import { toModelRelativeStoragePath } from "@/lib/session-files/storage";
 import type { SessionFileListItem, SessionFileSummary } from "@/lib/session-files/types";
 
 type SerializableSessionFile = {
   fileId: string;
   rawSessionId: string;
   originalName: string;
+  relativePath: string;
   source?: "device" | "ms365";
   ms365LocationId?: string | null;
   ms365DriveId?: string | null;
@@ -32,6 +34,7 @@ export function serializeSessionFile(file: SerializableSessionFile): SessionFile
     fileId: file.fileId,
     rawSessionId: file.rawSessionId,
     originalName: file.originalName,
+    relativePath: toModelRelativeStoragePath(file.relativePath),
     source: file.source === "ms365" ? "ms365" : "device",
     ms365LocationId: file.ms365LocationId ?? undefined,
     ms365DriveId: file.ms365DriveId ?? undefined,

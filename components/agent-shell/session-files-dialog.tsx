@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { AlertCircle, FileText, Loader2, Paperclip, Search, Trash2, X } from "lucide-react";
+import {
+  AlertCircle,
+  Cloud,
+  FileText,
+  HardDriveUpload,
+  Loader2,
+  Paperclip,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -67,6 +78,7 @@ type SessionFilesDialogProps = {
   open: boolean;
   scope: FilesDialogScope;
   resourceId?: string;
+  onAttachFiles: (files: Array<StoredFileListItem>) => void;
   onOpenChange: (open: boolean) => void;
   onSummaryChange: (
     scope: FilesDialogScope,
@@ -177,6 +189,7 @@ export function SessionFilesDialog({
   open,
   scope,
   resourceId,
+  onAttachFiles,
   onOpenChange,
   onSummaryChange,
   refreshToken = 0,
@@ -342,6 +355,10 @@ export function SessionFilesDialog({
   const hasSelectedFiles = selectedFileIds.size > 0;
   const selectedOnCurrentPage = pageFileIds.filter((fileId) => selectedFileIds.has(fileId)).length;
   const uploadingCount = pendingUploads.filter((upload) => upload.status === "uploading").length;
+  const selectedStoredFiles = useMemo(
+    () => files.filter((file) => selectedFileIds.has(file.fileId)),
+    [files, selectedFileIds]
+  );
 
   useEffect(() => {
     const root = tableScrollAreaRef.current;
@@ -474,6 +491,15 @@ export function SessionFilesDialog({
     },
     [onOpenChange]
   );
+
+  const handleAttachFiles = useCallback(() => {
+    if (selectedStoredFiles.length === 0) {
+      return;
+    }
+
+    onAttachFiles(selectedStoredFiles);
+    handleDialogOpenChange(false);
+  }, [handleDialogOpenChange, onAttachFiles, selectedStoredFiles]);
 
   const processChosenFiles = useCallback(async (nextFiles: Array<File>) => {
     if (nextFiles.length > 0) {
@@ -755,10 +781,10 @@ export function SessionFilesDialog({
                       />
                     </div>
                     <div className="min-w-0 flex-1 px-2 py-3">Name</div>
-                    <div className="w-28 shrink-0 px-2 py-3">Source</div>
-                    <div className="w-14 shrink-0 px-2 py-3">Type</div>
-                    <div className="w-16 shrink-0 px-2 py-3">Size</div>
-                    <div className="w-24 shrink-0 px-2 py-3">Added</div>
+                    <div className="hidden w-28 shrink-0 px-2 py-3 sm:block">Source</div>
+                    <div className="hidden w-14 shrink-0 px-2 py-3 sm:block">Type</div>
+                    <div className="hidden w-16 shrink-0 px-2 py-3 sm:block">Size</div>
+                    <div className="hidden w-24 shrink-0 px-2 py-3 sm:block">Added</div>
                     <div className="flex w-14 shrink-0 items-center justify-center px-2 py-3">Action</div>
                   </div>
 
@@ -803,17 +829,20 @@ export function SessionFilesDialog({
                                   {upload.originalName}
                                 </span>
                               </div>
+                              <p className="mt-0.5 truncate text-xs text-(--ink-muted) sm:hidden">
+                                {formatFileSource(upload.source)} · {formatMimeType(upload.mime)} · {formatBytes(upload.size)}
+                              </p>
                             </div>
-                            <div className="w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {formatFileSource(upload.source)}
                             </div>
-                            <div className="w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft)" title={upload.mime ?? undefined}>
+                            <div className="hidden w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block" title={upload.mime ?? undefined}>
                               {formatMimeType(upload.mime)}
                             </div>
-                            <div className="w-16 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-16 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {formatBytes(upload.size)}
                             </div>
-                            <div className="w-24 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-24 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {new Date(upload.createdAt).toLocaleDateString()}
                             </div>
                             <div className="w-14 shrink-0 px-2 py-3" />
@@ -846,17 +875,20 @@ export function SessionFilesDialog({
                                   {file.originalName}
                                 </span>
                               </div>
+                              <p className="mt-0.5 truncate text-xs text-(--ink-muted) sm:hidden">
+                                {formatFileSource(file.source)} · {formatMimeType(file.mime)} · {formatBytes(file.size)} · {new Date(file.createdAt).toLocaleDateString()}
+                              </p>
                             </div>
-                            <div className="w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {formatFileSource(file.source)}
                             </div>
-                            <div className="w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft)" title={file.mime ?? undefined}>
+                            <div className="hidden w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block" title={file.mime ?? undefined}>
                               {formatMimeType(file.mime)}
                             </div>
-                            <div className="w-16 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-16 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {formatBytes(file.size)}
                             </div>
-                            <div className="w-24 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                            <div className="hidden w-24 shrink-0 px-2 py-3 text-sm text-(--ink-soft) sm:block">
                               {new Date(file.createdAt).toLocaleDateString()}
                             </div>
                             <div
@@ -944,6 +976,18 @@ export function SessionFilesDialog({
             >
               Close
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="agent-btn rounded-none border-2 shadow-none"
+              disabled={!hasSelectedFiles}
+              onClick={handleAttachFiles}
+            >
+              <Paperclip className="size-4" />
+              {hasSelectedFiles
+                ? `Attach${selectedFileIds.size > 0 ? ` (${selectedFileIds.size})` : ""}`
+                : "Attach"}
+            </Button>
             <DropdownMenu open={isUploadMenuOpen} onOpenChange={setIsUploadMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -952,7 +996,7 @@ export function SessionFilesDialog({
                   className="agent-btn rounded-none border-2 shadow-none"
                   disabled={!canUploadFiles || !resourceId}
                 >
-                  {isUploadingFiles ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+                  {isUploadingFiles ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
                   {isUploadingFiles ? "Adding files..." : "Upload files"}
                 </Button>
               </DropdownMenuTrigger>
@@ -971,6 +1015,7 @@ export function SessionFilesDialog({
                     }, 0);
                   }}
                 >
+                  <HardDriveUpload className="size-4" />
                   {isUploadingFiles ? "Uploading…" : "From your device"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -981,6 +1026,7 @@ export function SessionFilesDialog({
                     setIsMs365DialogOpen(true);
                   }}
                 >
+                  <Cloud className="size-4" />
                   From Microsoft 365
                 </DropdownMenuItem>
               </DropdownMenuContent>

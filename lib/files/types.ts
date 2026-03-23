@@ -5,6 +5,7 @@ export type StoredFileListItem = {
   rawSessionId?: string;
   matterId?: string;
   originalName: string;
+  relativePath: string;
   source: StoredFileSource;
   ms365LocationId?: string;
   ms365DriveId?: string;

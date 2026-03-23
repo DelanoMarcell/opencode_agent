@@ -1,7 +1,7 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const AGENT_STORAGE_ROOT_SEGMENTS = [".agent"] as const;
+const WORKSPACE_STORAGE_ROOT_SEGMENTS = [".agent"] as const;
 
 function sanitizeSegment(value: string) {
   const normalized = value.normalize("NFKC").trim();
@@ -30,7 +30,19 @@ function splitSafeFileName(name: string) {
 }
 
 export function getSessionFilesRoot() {
-  return path.join(process.cwd(), ...AGENT_STORAGE_ROOT_SEGMENTS);
+  return path.join(process.cwd(), getWorkspaceStorageRootRelativePath());
+}
+
+export function getWorkspaceStorageRootRelativePath() {
+  return path.posix.join(...WORKSPACE_STORAGE_ROOT_SEGMENTS);
+}
+
+export function toWorkspaceRelativeStoragePath(storageRelativePath: string) {
+  return path.posix.join(getWorkspaceStorageRootRelativePath(), storageRelativePath);
+}
+
+export function toModelRelativeStoragePath(storageRelativePath: string) {
+  return storageRelativePath;
 }
 
 export function getOrganisationFolderName(organisationName: string) {

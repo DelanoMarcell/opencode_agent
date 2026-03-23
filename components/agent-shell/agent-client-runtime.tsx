@@ -157,6 +157,10 @@ type PendingSidebarSession = {
 };
 
 type FilesDialogScope = "session" | "matter";
+type PendingAttachedFile = Pick<
+  StoredFileListItem,
+  "fileId" | "originalName" | "relativePath" | "source"
+>;
 
 function buildFilesApiEndpoint(scope: FilesDialogScope, resourceId: string) {
   return scope === "matter"
@@ -200,11 +204,30 @@ function resolveDisplayedSessionTitle(
   return "Untitled";
 }
 
-function buildPromptFromComposerState(promptText: string) {
+function buildAttachedFilesBlock(attachedFiles: Array<PendingAttachedFile>) {
+  if (attachedFiles.length === 0) {
+    return "";
+  }
+
+  return `<attached_files>\nThese are the only attached files for this request.\nUse only these exact paths when accessing attached files for this request.\nDo not use any other local files unless the user explicitly asks you to.\nRefer to attached files by filename only in your response, not by full path.\n${attachedFiles
+    .map((file) => file.relativePath)
+    .join("\n")}\n</attached_files>`;
+}
+
+function buildPromptFromComposerState(
+  promptText: string,
+  attachedFiles: Array<PendingAttachedFile>
+) {
   const trimmedPrompt = promptText.trim();
+  const attachedFilesBlock = buildAttachedFilesBlock(attachedFiles);
+  const nextPrompt =
+    trimmedPrompt && attachedFilesBlock
+      ? `${trimmedPrompt}\n\n${attachedFilesBlock}`
+      : trimmedPrompt || attachedFilesBlock;
+
   return {
-    displayPrompt: trimmedPrompt,
-    runtimePrompt: trimmedPrompt,
+    displayPrompt: nextPrompt,
+    runtimePrompt: nextPrompt,
   };
 }
 
@@ -378,6 +401,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [matters, setMatters] = useState<Array<AgentBootstrapMatter>>(bootstrap.matters);
   const [timeline, setTimeline] = useState<Array<TimelineItem>>(bootstrapSessionState.timeline);
   const [inputText, setInputText] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<Array<PendingAttachedFile>>([]);
   const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [filesDialogRefreshToken, setFilesDialogRefreshToken] = useState(0);
@@ -2184,6 +2208,33 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setIsFilesDialogOpen(true);
   }, []);
 
+  const handleAttachFiles = useCallback(
+    (files: Array<StoredFileListItem>) => {
+      setAttachedFiles((current) => {
+        const next = new Map(current.map((file) => [file.fileId, file]));
+        for (const file of files) {
+          next.set(file.fileId, {
+            fileId: file.fileId,
+            originalName: file.originalName,
+            relativePath: file.relativePath,
+            source: file.source,
+          });
+        }
+        return Array.from(next.values());
+      });
+      appendTrace(`files attached for next send: ${files.length}`);
+    },
+    [appendTrace]
+  );
+
+  const handleRemoveAttachedFile = useCallback((fileId: string) => {
+    setAttachedFiles((current) => current.filter((file) => file.fileId !== fileId));
+  }, []);
+
+  const handleClearAttachedFiles = useCallback(() => {
+    setAttachedFiles([]);
+  }, []);
+
   const handleLocalFilesUpload = useCallback(
     async (
       files: Array<File>,
@@ -2645,6 +2696,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setSessionRecordsByRawSessionId(bootstrap.sessionRecordsByRawSessionId);
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
+    setAttachedFiles([]);
     setIsFilesDialogOpen(false);
     pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
@@ -2811,7 +2863,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   ]);
 
   const sendPrompt = useCallback(async () => {
-    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(inputText);
+    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(inputText, attachedFiles);
     if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
@@ -2883,6 +2935,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         sessionID: liveSessionID,
         parts: [{ type: "text", text: runtimePrompt }],
       });
+      setAttachedFiles([]);
 
       const pendingSidebarSession = pendingSidebarSessionRef.current;
       if (pendingSidebarSession?.rawSessionId === liveSessionID) {
@@ -2916,6 +2969,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       markAssistantCardsComplete();
     }
   }, [
+    attachedFiles,
     appendUserCard,
     appendTrace,
     ensureSession,
@@ -3354,6 +3408,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ) : null}
 
           <AgentComposer
+            attachedFiles={attachedFiles}
             composerPlaceholder={composerPlaceholder}
             canManageFiles={Boolean(currentFilesResourceId)}
             contextBreakdownRows={contextBreakdownRows}
@@ -3365,10 +3420,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             isLoadingSelectedSession={isLoadingSelectedSession}
             latestContextUsage={latestContextUsage}
             modelLabel={modelLabel}
+            onClearAttachedFiles={handleClearAttachedFiles}
             onInputTextChange={setInputText}
             currentFilesSummary={currentFilesSummary}
             onOpenFiles={handleOpenFiles}
             onKeyDown={handleComposerKeyDown}
+            onRemoveAttachedFile={handleRemoveAttachedFile}
             onSend={() => void sendPrompt()}
             sendDisabled={
               !inputText.trim() ||
@@ -3397,6 +3454,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           open={isFilesDialogOpen}
           scope={activeFilesScope}
           resourceId={currentFilesResourceId}
+          onAttachFiles={handleAttachFiles}
           onOpenChange={setIsFilesDialogOpen}
           onSummaryChange={handleFilesSummaryChange}
           refreshToken={filesDialogRefreshToken}

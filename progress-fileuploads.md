@@ -60,34 +60,63 @@
   - optional `ms365WebUrl`
 - [done] Surface the new origin in the shared files dialog with a `Source` column for both session and matter files
 - [done] Verify the end-to-end storage/list/delete flow and update this file with final status
+- [done] Expose a model-ready relative path to the client for stored files:
+  - the serialized file payload now includes `relativePath`
+  - the value is normalized to a repo-root path under `.agent/...`
+  - the underlying Mongo `relativePath` field remains unchanged, so no backfill is required
+- [done] Implement the first real attach behavior on top of the current libraries:
+  - clicking `Attach` in `Files In This Session` or `Files In This Matter` now takes the currently selected stored files
+  - attached files are stored as transient client runtime state only
+  - repeated attach actions before send are cumulative and deduped by `fileId`
+  - the files dialog closes immediately after attaching
+- [done] Implement the agreed first send-time prompt behavior:
+  - attached files apply to the next send only
+  - attached files clear after a successful send
+  - attached files also clear when the chat route/context changes
+  - the prompt currently appends the raw attachment block below the user text
+  - stripping and pill rendering remain intentionally deferred
+- [done] Add the first pre-send attachment UX in the composer:
+  - attached files now show above the text box before send
+  - the composer shows the first few attached filenames directly
+  - additional attachments collapse into an `… and N more` summary
+  - visible attachments can be removed individually
+  - all pending attachments can be removed with `Clear all`
+- [done] Use the agreed first hidden attachment format for this phase, even though it is still rendered visibly:
+  - user text first
+  - blank line
+  - `<attached_files>`
+  - one `.agent/...` relative path per line
+  - `</attached_files>`
 
-- [next] Define the assistant attach model on top of the current session and matter libraries
-- [next] Decide what counts as a user-intended "attached file" for a single send without persisting premature assistant-selection state in Mongo
-- [next] Decide how the runtime should pass chosen local files to the model without showing hidden context in the visible chat timeline
-- [next] Decide whether the first assistant-facing version should use:
-  - direct filesystem access into the current session or matter library
-  - or a narrower manifest-based hidden runtime instruction
-- [next] Define the exact per-send attach UX for local files:
-  - where files are selected from
-  - when they are considered attached
-  - when they are cleared
-  - how they appear in the UI, if at all
-- [next] Fold Microsoft 365 into the same library model after local attach semantics are stable:
-  - browse SharePoint locations
-  - choose files
-  - copy/store them into the matter or session local file library
-  - then reuse the same attach/runtime path as local uploads
-- [next] Decide whether MS365 selection should write directly into the local library immediately or first stage in a temporary import step
+- [next] Restore attachment awareness when stored messages come back from OpenCode:
+  - parse the hidden `<attached_files>` block from stored user messages during hydration
+  - strip the hidden block from visible text rendering only
+  - render attached-file pills for that message based on the parsed paths
+  - derive the pill label from the last path segment instead of duplicating `name` in the hidden block
+- [next] Define the exact composer/runtime attach UX:
+  - whether the current first-few-plus-summary composer strip is sufficient
+  - whether hidden attachments beyond the preview need their own expandable review surface before send
+  - how the user can tell which files were attached on an already-sent message
+- [next] Reuse the same attach/runtime path for Microsoft 365 imports now that imports land in the same local libraries:
+  - imported MS365 files should behave exactly like device-uploaded files once they appear in the session or matter table
+  - no separate model attachment path should exist for Microsoft 365 after import
 - [next] Verify the full combined path after attach semantics are implemented:
   - local device upload to session
   - local device upload to matter
   - MS365 import into session
   - MS365 import into matter
+  - attach selected stored files from session library
+  - attach selected stored files from matter library
+  - render stored-message attachment pills after reload
   - assistant-visible attach behavior on send
 
 ## Notes
 
-- This slice is intentionally limited to file storage, listing, and delete
+- This slice now covers:
+  - file storage
+  - listing/search/delete
+  - Microsoft 365 import into the same local libraries
+  - first-pass transient attach state and raw prompt injection
 - The filesystem contract is:
   - `.agent/<organisationName>/session-files/<rawSessionId>/`
   - `.agent/<organisationName>/matter-files/<matterCode>/`
@@ -96,13 +125,15 @@
   - matter chats use the matter library
   - matter-overview uploads use the matter library so files are shared across chats in that matter
 - Session and matter libraries are now the canonical local storage layer for uploaded device files
-- MS365 is not yet part of that canonical library layer:
+- Microsoft 365 is now part of that canonical library layer:
   - locations are stored in Mongo
   - browsing works
   - selected Microsoft 365 files can now be imported into the same local file libraries as device uploads
 - Assistant-facing attach behavior is still intentionally deferred:
-  - no hidden runtime prompt injection yet
-  - no file-aware model behavior yet
-  - no persisted "selected for assistant use" state
-  - no file search or extraction pipeline yet
+  - the agreed first version is transient per-message attach state only, and that first attach slice is now implemented
+  - attached files are currently passed to the model via a raw `<attached_files>` runtime block appended below the user text
+  - hidden attachment context still needs to be stripped from visible message text on hydration
+  - attached-file pills still need to be rendered from parsed stored-message paths
+  - no persisted "selected for assistant use" state should be introduced
+  - no file search or extraction pipeline is planned for this first attach pass
 - Verification completed with `git diff --check`; bounded `tsc --noEmit` and targeted `eslint` runs timed out in this repo without returning diagnostics
