@@ -4,6 +4,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -69,6 +70,7 @@ import {
   formatTokenCount,
   formatUsdAmount,
   getTokenUsageTotal,
+  parseAttachedFilesFromText,
 } from "@/lib/agent-runtime/helpers";
 import type {
   AgentEvent,
@@ -220,14 +222,14 @@ function buildPromptFromComposerState(
 ) {
   const trimmedPrompt = promptText.trim();
   const attachedFilesBlock = buildAttachedFilesBlock(attachedFiles);
-  const nextPrompt =
+  const runtimePrompt =
     trimmedPrompt && attachedFilesBlock
       ? `${trimmedPrompt}\n\n${attachedFilesBlock}`
       : trimmedPrompt || attachedFilesBlock;
 
   return {
-    displayPrompt: nextPrompt,
-    runtimePrompt: nextPrompt,
+    displayPrompt: trimmedPrompt,
+    runtimePrompt,
   };
 }
 
@@ -630,7 +632,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     });
   }, [getTimelineViewport]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     scrollTimelineToBottom();
 
@@ -665,7 +667,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, []);
 
   const appendUserCard = useCallback(
-    (messageID: string, text: string, createdAt = Date.now(), localOnly = true) => {
+    (
+      messageID: string,
+      text: string,
+      createdAt = Date.now(),
+      localOnly = true,
+      attachedFiles: PendingOptimisticUserMessage["attachedFiles"] = []
+    ) => {
       messageRoleByIDRef.current.set(messageID, "user");
       mutateMessageState((messages) => {
         messages.push({
@@ -674,6 +682,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           parentID: undefined,
           createdAt,
           text,
+          attachedFiles,
           localOnly,
         });
       });
@@ -711,6 +720,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               ...serverMessage,
               createdAt,
               text: serverMessage.text || localMessage.text,
+              attachedFiles:
+                serverMessage.attachedFiles.length > 0
+                  ? serverMessage.attachedFiles
+                  : localMessage.attachedFiles,
               localOnly: false,
             };
           }
@@ -745,11 +758,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const maybeReconcileOptimisticUserFromTextPart = useCallback(
     (serverMessageID: string, sessionID: string, text: string) => {
       const pendingOptimisticUser = pendingOptimisticUserRef.current;
+      const parsed = parseAttachedFilesFromText(text);
       if (
         !pendingOptimisticUser ||
         (pendingOptimisticUser.sessionID !== null &&
           pendingOptimisticUser.sessionID !== sessionID) ||
-        text !== pendingOptimisticUser.text
+        parsed.visibleText !== pendingOptimisticUser.text
       ) {
         return false;
       }
@@ -773,6 +787,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           parentID: existing?.parentID ?? parentID,
           createdAt: existing?.createdAt ?? createdAt,
           text: "",
+          attachedFiles: [],
           localOnly: false,
         });
       });
@@ -790,6 +805,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           parentID: existing?.parentID,
           createdAt: existing?.createdAt ?? Date.now(),
           text: "",
+          attachedFiles: [],
           localOnly: false,
         });
 
@@ -819,6 +835,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           parentID: existing?.parentID,
           createdAt: existing?.createdAt ?? Date.now(),
           text: "",
+          attachedFiles: [],
           localOnly: false,
         });
 
@@ -851,6 +868,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           parentID: existing?.parentID,
           createdAt: existing?.createdAt ?? Date.now(),
           text: "",
+          attachedFiles: [],
           localOnly: false,
         });
 
@@ -1459,6 +1477,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               parentID: undefined,
               createdAt,
               text: existing?.role === "user" ? existing.text : "",
+              attachedFiles: existing?.role === "user" ? existing.attachedFiles : [],
               localOnly: false,
             });
           });
@@ -2867,6 +2886,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
+    const nextAttachedFileRefs = attachedFiles.map((file) => ({
+      path: file.relativePath,
+      label: file.originalName,
+    }));
 
     setInputText("");
     setErrorText(null);
@@ -2881,13 +2904,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
-    appendUserCard(userMessageID, displayPrompt, userCreatedAt, true);
+    appendUserCard(userMessageID, displayPrompt, userCreatedAt, true, nextAttachedFileRefs);
     pendingOptimisticUserRef.current = {
       localMessageID: userMessageID,
       sessionID: null,
       text: displayPrompt,
+      attachedFiles: nextAttachedFileRefs,
       createdAt: userCreatedAt,
     };
+    setAttachedFiles([]);
 
     setIsBusy(true);
     setRunUiPhase("thinking");
@@ -2927,6 +2952,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         localMessageID: userMessageID,
         sessionID: liveSessionID,
         text: displayPrompt,
+        attachedFiles: nextAttachedFileRefs,
         createdAt: userCreatedAt,
       };
       streamLastEventAtRef.current = Date.now();
@@ -2935,7 +2961,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         sessionID: liveSessionID,
         parts: [{ type: "text", text: runtimePrompt }],
       });
-      setAttachedFiles([]);
 
       const pendingSidebarSession = pendingSidebarSessionRef.current;
       if (pendingSidebarSession?.rawSessionId === liveSessionID) {
@@ -2959,6 +2984,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     } catch (error) {
       const message = toErrorMessage(error);
       pendingOptimisticUserRef.current = null;
+      setAttachedFiles(attachedFiles);
       setErrorText(message);
       setIsBusy(false);
       appendTrace(`prompt error: ${message}`);
@@ -3161,7 +3187,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       shouldAutoScrollRef.current = true;
       setTimeline([]);
       setInputText("");
-      setMs365Attachments([]);
+      setAttachedFiles([]);
       setIsFilesDialogOpen(false);
       setIsUploadingFiles(false);
       setTraceLines([]);

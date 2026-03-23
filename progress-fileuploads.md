@@ -62,7 +62,7 @@
 - [done] Verify the end-to-end storage/list/delete flow and update this file with final status
 - [done] Expose a model-ready relative path to the client for stored files:
   - the serialized file payload now includes `relativePath`
-  - the value is normalized to a repo-root path under `.agent/...`
+  - the value is now the model-facing path relative to the agent working directory, for example `LNP/session-files/...`
   - the underlying Mongo `relativePath` field remains unchanged, so no backfill is required
 - [done] Implement the first real attach behavior on top of the current libraries:
   - clicking `Attach` in `Files In This Session` or `Files In This Matter` now takes the currently selected stored files
@@ -74,29 +74,39 @@
   - attached files clear after a successful send
   - attached files also clear when the chat route/context changes
   - the prompt currently appends the raw attachment block below the user text
-  - stripping and pill rendering remain intentionally deferred
+  - the raw block is kept in stored runtime text for the model, while visible rendering is now stripped separately
 - [done] Add the first pre-send attachment UX in the composer:
   - attached files now show above the text box before send
   - the composer shows the first few attached filenames directly
   - additional attachments collapse into an `… and N more` summary
   - visible attachments can be removed individually
   - all pending attachments can be removed with `Clear all`
-- [done] Use the agreed first hidden attachment format for this phase, even though it is still rendered visibly:
+- [done] Use the agreed first hidden attachment format for this phase:
   - user text first
   - blank line
   - `<attached_files>`
-  - one `.agent/...` relative path per line
+  - one model-facing `LNP/...` or equivalent storage-relative path per line
   - `</attached_files>`
+- [done] Strip the raw `<attached_files>` block from visible message rendering and replace it with per-message pills:
+  - stored user messages are parsed during hydration
+  - the visible user text is rendered without the raw attachment block
+  - attached files are carried as metadata on that specific user message
+  - attachment pills render inside that specific user message card after send and after reload
 
 - [next] Restore attachment awareness when stored messages come back from OpenCode:
-  - parse the hidden `<attached_files>` block from stored user messages during hydration
-  - strip the hidden block from visible text rendering only
-  - render attached-file pills for that message based on the parsed paths
-  - derive the pill label from the last path segment instead of duplicating `name` in the hidden block
+  - verify the hydration/reconciliation path behaves cleanly across longer conversations and compaction
+- [next] Add hidden default file-library scope guidance even when no explicit files are attached:
+  - when a chat has a session or matter file library but the user has not explicitly attached files for this message, the model should still be told about that library in hidden runtime context
+  - that hidden prompt should make clear that no explicit attachments were provided for this request
+  - that hidden prompt should also include how many files are currently in that session or matter library so the model knows whether there are any uploaded files it can even try to use
+  - it should tell the model that if the user asks about uploaded files, this library is the only directory it may use for uploaded-file work
+  - it should tell the model not to use any other local files outside that session or matter library unless the user explicitly asks
+  - this hidden library-scope prompt must not be rendered back to the user in the visible chat UI
 - [next] Define the exact composer/runtime attach UX:
   - whether the current first-few-plus-summary composer strip is sufficient
   - whether hidden attachments beyond the preview need their own expandable review surface before send
   - how the user can tell which files were attached on an already-sent message
+  - how attached files should open in a new tab when the file type supports it, especially PDFs and other browser-viewable files
 - [next] Reuse the same attach/runtime path for Microsoft 365 imports now that imports land in the same local libraries:
   - imported MS365 files should behave exactly like device-uploaded files once they appear in the session or matter table
   - no separate model attachment path should exist for Microsoft 365 after import

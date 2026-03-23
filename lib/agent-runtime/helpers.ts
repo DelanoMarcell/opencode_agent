@@ -1,6 +1,7 @@
 import type { Part, QuestionInfo } from "@opencode-ai/sdk/v2/client";
 
 import type {
+  AttachedFileReference,
   AssistantUsageSnapshot,
   CostFormulaGroup,
   CostFormulaRow,
@@ -524,6 +525,54 @@ export function compareAscending(left: string, right: string): number {
   return 0;
 }
 
+const ATTACHED_FILES_BLOCK_PATTERN = /<attached_files>\s*([\s\S]*?)\s*<\/attached_files>/i;
+
+export function getAttachedFileLabel(path: string): string {
+  const normalized = path.trim().replace(/\\/g, "/");
+  const label = normalized.split("/").pop()?.trim();
+  return label || normalized;
+}
+
+export function parseAttachedFilesFromText(text: string): {
+  visibleText: string;
+  attachedFiles: Array<AttachedFileReference>;
+} {
+  const normalizedText = text.trim();
+  if (!normalizedText) {
+    return {
+      visibleText: "",
+      attachedFiles: [],
+    };
+  }
+
+  const match = normalizedText.match(ATTACHED_FILES_BLOCK_PATTERN);
+  if (!match) {
+    return {
+      visibleText: normalizedText,
+      attachedFiles: [],
+    };
+  }
+
+  const blockBody = match[1] ?? "";
+  const attachedFiles = blockBody
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      const normalized = line.replace(/\\/g, "/");
+      return normalized.length > 0 && normalized.includes("/");
+    })
+    .map((path) => ({
+      path,
+      label: getAttachedFileLabel(path),
+    }));
+
+  const visibleText = normalizedText.replace(ATTACHED_FILES_BLOCK_PATTERN, "").trim();
+  return {
+    visibleText,
+    attachedFiles,
+  };
+}
+
 export function sortStoredParts(parts: Array<Part>): Array<Part> {
   return [...parts];
 }
@@ -565,11 +614,12 @@ export function buildTimelineFromMessageState(
   for (const message of sortMessageEntries(messages)) {
     if (message.role === "user") {
       const text = message.text.trim();
-      if (!text) continue;
+      if (!text && message.attachedFiles.length === 0) continue;
       next.push({
         id: message.id,
         kind: "user",
         text: message.text,
+        attachedFiles: message.attachedFiles,
       });
       continue;
     }
@@ -614,13 +664,15 @@ export function updateUserMessageText(
   const existing = findMessageEntry(entries, messageID);
   const currentText = existing?.role === "user" ? existing.text : "";
   const nextText = mode === "append" ? `${currentText}${text}` : text;
+  const parsed = parseAttachedFilesFromText(nextText);
 
   upsertMessageEntry(entries, {
     id: messageID,
     role: "user",
     parentID: existing?.parentID,
     createdAt: existing?.createdAt ?? Date.now(),
-    text: nextText,
+    text: parsed.visibleText,
+    attachedFiles: parsed.attachedFiles,
     localOnly: existing?.localOnly ?? false,
   });
 }
@@ -771,20 +823,22 @@ export function buildMessageStateFromStoredMessages(storedMessages: Array<Stored
 
   for (const message of ordered) {
     if (message.info.role === "user") {
-      const text = sortStoredParts(message.parts)
+      const rawText = sortStoredParts(message.parts)
         .filter((part): part is Extract<Part, { type: "text" }> => part.type === "text")
         .map((part) => part.text)
         .join("\n")
         .trim();
+      const parsed = parseAttachedFilesFromText(rawText);
 
-      if (!text) continue;
+      if (!parsed.visibleText && parsed.attachedFiles.length === 0) continue;
 
       messages.push({
         id: message.info.id,
         role: "user",
         parentID: undefined,
         createdAt: message.info.time.created,
-        text,
+        text: parsed.visibleText,
+        attachedFiles: parsed.attachedFiles,
         localOnly: false,
       });
       continue;
@@ -799,6 +853,7 @@ export function buildMessageStateFromStoredMessages(storedMessages: Array<Stored
           : undefined,
       createdAt: message.info.time.created,
       text: "",
+      attachedFiles: [],
       localOnly: false,
     });
 

@@ -1,7 +1,7 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const WORKSPACE_STORAGE_ROOT_SEGMENTS = [".agent"] as const;
+const WORKSPACE_STORAGE_ROOT_SEGMENTS = ["agent"] as const;
 
 function sanitizeSegment(value: string) {
   const normalized = value.normalize("NFKC").trim();

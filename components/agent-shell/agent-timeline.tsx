@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode, RefObject } from "react";
+import { FileText, Paperclip } from "lucide-react";
 
 import { Streamdown } from "streamdown";
 
@@ -38,9 +39,31 @@ export function AgentTimeline({
                 return (
                   <article key={item.id} className="flex min-w-0 justify-end">
                     <div className="agent-card agent-card-user min-w-0 max-w-[90%] border-2 px-4 py-3 text-sm sm:max-w-[85%]">
-                      <Streamdown className="agent-markdown" mode="static">
-                        {item.text}
-                      </Streamdown>
+                      {item.text ? (
+                        <Streamdown className="agent-markdown" mode="static">
+                          {item.text}
+                        </Streamdown>
+                      ) : null}
+                      {item.attachedFiles.length > 0 ? (
+                        <div className={item.text ? "mt-3" : ""}>
+                          <div className="mb-2 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                            <Paperclip className="size-3.5" />
+                            Attached files
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {item.attachedFiles.map((file) => (
+                              <div
+                                key={`${item.id}-${file.path}`}
+                                className="inline-flex max-w-full items-center gap-1.5 border border-(--border) bg-(--surface) px-2 py-1 text-xs"
+                                title={file.path}
+                              >
+                                <FileText className="size-3 shrink-0 text-(--ink-soft)" />
+                                <span className="truncate max-w-[14rem]">{file.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </article>
                 );

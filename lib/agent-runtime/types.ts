@@ -18,11 +18,17 @@ export type RuntimeToolCall = {
   status: "pending" | "running" | "completed" | "error";
 };
 
+export type AttachedFileReference = {
+  path: string;
+  label: string;
+};
+
 export type TimelineItem =
   | {
       id: string;
       kind: "user";
       text: string;
+      attachedFiles: Array<AttachedFileReference>;
     }
   | {
       id: string;
@@ -46,6 +52,7 @@ export type MessageEntry = {
   parentID?: string;
   createdAt: number;
   text: string;
+  attachedFiles: Array<AttachedFileReference>;
   localOnly: boolean;
 };
 
@@ -67,6 +74,7 @@ export type PendingOptimisticUserMessage = {
   localMessageID: string;
   sessionID: string | null;
   text: string;
+  attachedFiles: Array<AttachedFileReference>;
   createdAt: number;
 };
 
