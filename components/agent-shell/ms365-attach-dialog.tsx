@@ -447,7 +447,7 @@ export function Ms365AttachDialog({
               </div>
 
               {/* File list */}
-              <ScrollArea className="flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
+              <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
                 {/* Error */}
                 {hasLocations && errorText ? (
                   <div className="m-3 border-2 border-(--danger) bg-(--danger-soft) px-3 py-2.5 text-sm text-(--danger)">

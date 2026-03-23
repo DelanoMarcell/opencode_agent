@@ -16,7 +16,61 @@
 - [done] Add an `Attach` dropdown action for `Upload from your device`
 - [done] Wire general chats to upload into the active session library
 - [done] Wire matter chats and matter-overview uploads into the active matter library
+- [done] Confirm the current local upload behavior end to end:
+  - general chat uploads go into the active session file library
+  - matter chat uploads go into the active matter file library
+  - matter-overview uploads also go into the active matter file library
+  - session and matter files are listed and deleted through the same shared dialog surface
+- [done] Keep disk names human-readable while avoiding clashes:
+  - preserve the original filename on first save
+  - resolve same-name collisions naturally as `file.pdf`, `file (1).pdf`, `file (2).pdf`
+  - store the chosen on-disk name in Mongo as `storedName`
+- [done] Prevent exact duplicate file content per scope:
+  - compute `checksumSha256` before any disk write
+  - skip writing and skip creating a new DB row when the same checksum already exists in the same session or matter library
+  - enforce checksum uniqueness per scope in Mongo
+- [done] Keep the current slice scoped to file-library management only:
+  - upload
+  - browse
+  - search
+  - single delete
+  - bulk delete
+  - no assistant-facing attach semantics yet
+- [done] Move Microsoft 365 out of the chat-attach runtime for now:
+  - remove MS365 selected-file pills above the composer
+  - remove MS365 prompt/runtime injection
+  - keep the MS365 browser as a separate browsing/upload surface only
+- [done] Move MS365 allowlisted locations out of env and into Mongo
+- [done] Scope MS365 allowed locations by organisation instead of keeping them global
+- [done] Verify the current MS365 storage/browsing position:
+  - SharePoint locations are now managed through `/ms365/allowlist`
+  - the attach dialog is currently a browser only
+  - MS365 files are not yet stored into the session or matter local file libraries
 - [done] Verify the end-to-end storage/list/delete flow and update this file with final status
+
+- [next] Define the assistant attach model on top of the current session and matter libraries
+- [next] Decide what counts as a user-intended "attached file" for a single send without persisting premature assistant-selection state in Mongo
+- [next] Decide how the runtime should pass chosen local files to the model without showing hidden context in the visible chat timeline
+- [next] Decide whether the first assistant-facing version should use:
+  - direct filesystem access into the current session or matter library
+  - or a narrower manifest-based hidden runtime instruction
+- [next] Define the exact per-send attach UX for local files:
+  - where files are selected from
+  - when they are considered attached
+  - when they are cleared
+  - how they appear in the UI, if at all
+- [next] Fold Microsoft 365 into the same library model after local attach semantics are stable:
+  - browse SharePoint locations
+  - choose files
+  - copy/store them into the matter or session local file library
+  - then reuse the same attach/runtime path as local uploads
+- [next] Decide whether MS365 selection should write directly into the local library immediately or first stage in a temporary import step
+- [next] Verify the full combined path after attach semantics are implemented:
+  - local device upload to session
+  - local device upload to matter
+  - MS365 import into session
+  - MS365 import into matter
+  - assistant-visible attach behavior on send
 
 ## Notes
 
@@ -24,7 +78,18 @@
 - The filesystem contract is:
   - `.agent/<organisationName>/session-files/<rawSessionId>/`
   - `.agent/<organisationName>/matter-files/<matterCode>/`
-- General chats use the session library
-- Matter chats and matter-overview uploads use the matter library so the files are shared across chats in that matter
-- Prompt injection, hidden runtime context, file search, extraction, and assistant-facing attach behavior are explicitly out of scope for this pass
+- The current library split is now confirmed:
+  - general chats use the session library
+  - matter chats use the matter library
+  - matter-overview uploads use the matter library so files are shared across chats in that matter
+- Session and matter libraries are now the canonical local storage layer for uploaded device files
+- MS365 is not yet part of that canonical library layer:
+  - locations are stored in Mongo
+  - browsing works
+  - import into the local file libraries is still pending
+- Assistant-facing attach behavior is still intentionally deferred:
+  - no hidden runtime prompt injection yet
+  - no file-aware model behavior yet
+  - no persisted "selected for assistant use" state
+  - no file search or extraction pipeline yet
 - Verification completed with `git diff --check`; bounded `tsc --noEmit` and targeted `eslint` runs timed out in this repo without returning diagnostics

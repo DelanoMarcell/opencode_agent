@@ -4,7 +4,7 @@ import { dirname, join } from "path";
 
 // Resolve .env relative to this file so it works regardless of cwd
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenvConfig({ path: join(__dirname, "..", ".env") });
+dotenvConfig({ path: join(__dirname, "..", ".env"), quiet: true });
 
 function requireEnv(name: string): string {
   const value = process.env[name];

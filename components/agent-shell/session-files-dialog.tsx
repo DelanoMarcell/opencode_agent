@@ -169,6 +169,7 @@ export function SessionFilesDialog({
   const localFileInputRef = useRef<HTMLInputElement | null>(null);
   const tableScrollAreaRef = useRef<HTMLDivElement | null>(null);
   const [isMs365DialogOpen, setIsMs365DialogOpen] = useState(false);
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);
   const [files, setFiles] = useState<Array<StoredFileListItem>>([]);
   const [pendingUploads, setPendingUploads] = useState<Array<PendingUploadRow>>([]);
   const [query, setQuery] = useState("");
@@ -260,6 +261,8 @@ export function SessionFilesDialog({
       setPage(1);
       setSelectedFileIds(new Set());
       setIsBulkDeleteConfirmOpen(false);
+      setIsUploadMenuOpen(false);
+      setIsMs365DialogOpen(false);
       setPendingUploads([]);
       clearPendingUploadCleanupTimers();
     }
@@ -446,6 +449,17 @@ export function SessionFilesDialog({
     localFileInputRef.current?.click();
   }
 
+  const handleDialogOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        setIsUploadMenuOpen(false);
+        setIsMs365DialogOpen(false);
+      }
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange]
+  );
+
   const processChosenFiles = useCallback(async (nextFiles: Array<File>) => {
     if (nextFiles.length > 0) {
       const createdAt = new Date().toISOString();
@@ -527,7 +541,7 @@ export function SessionFilesDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="agent-dialog flex h-[min(85vh,48rem)] !w-[min(56rem,calc(100vw-2rem))] !max-w-none flex-col gap-0 overflow-hidden rounded-none border-2 border-(--border) bg-(--paper-2) p-0 shadow-[8px_8px_0_rgba(var(--shadow-ink),0.12)]">
         <input
           ref={localFileInputRef}
@@ -826,7 +840,7 @@ export function SessionFilesDialog({
             >
               Close
             </Button>
-            <DropdownMenu>
+            <DropdownMenu open={isUploadMenuOpen} onOpenChange={setIsUploadMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
@@ -847,7 +861,10 @@ export function SessionFilesDialog({
                   disabled={isUploadingFiles}
                   onSelect={(event) => {
                     event.preventDefault();
-                    handleOpenLocalFilePicker();
+                    setIsUploadMenuOpen(false);
+                    window.setTimeout(() => {
+                      handleOpenLocalFilePicker();
+                    }, 0);
                   }}
                 >
                   {isUploadingFiles ? "Uploading…" : "From your device"}
@@ -856,6 +873,7 @@ export function SessionFilesDialog({
                   className="agent-menu-item rounded-none py-2"
                   onSelect={(event) => {
                     event.preventDefault();
+                    setIsUploadMenuOpen(false);
                     setIsMs365DialogOpen(true);
                   }}
                 >

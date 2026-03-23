@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type RefObject } from "react";
+import { useState, type KeyboardEvent, type RefObject } from "react";
 import { Paperclip } from "lucide-react";
 
 import { AgentComposerLoader } from "@/components/loaders/agent-composer-loader";
@@ -84,6 +84,7 @@ export function AgentComposer({
   sessionTotalsRows,
   textareaRef,
 }: AgentComposerProps) {
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const isComposerDisabled = isBusy || isLoadingSelectedSession || isMatterSelectionRequired;
   const helperText = isMatterSelectionRequired
     ? "Select a matter folder before sending a message."
@@ -309,7 +310,7 @@ export function AgentComposer({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <DropdownMenu>
+            <DropdownMenu open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
@@ -328,8 +329,8 @@ export function AgentComposer({
                 <DropdownMenuItem
                   className="agent-menu-item rounded-none py-2"
                   disabled={!canManageFiles}
-                  onSelect={(event) => {
-                    event.preventDefault();
+                  onSelect={() => {
+                    setIsAttachMenuOpen(false);
                     onOpenFiles();
                   }}
                 >
