@@ -39,6 +39,7 @@ export type AgentBootstrapModelCatalog = {
   loaded: boolean;
   contextLimits: Record<string, number>;
   costs: Record<string, ModelCostInfo>;
+  variants: Record<string, string[]>;
 };
 
 export type AgentBootstrapSessionSnapshot = {

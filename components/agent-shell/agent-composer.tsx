@@ -9,6 +9,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -42,9 +46,12 @@ type ComposerAttachedFile = {
 
 type AgentComposerProps = {
   attachedFiles: Array<ComposerAttachedFile>;
+  availableModelVariants: Array<string>;
+  canSelectModelVariant: boolean;
   composerPlaceholder: string;
   contextBreakdownRows: Array<StatRow>;
   contextUsageText: string;
+  currentModelVariantLabel: string;
   filesScopeLabel: "session" | "matter";
   inputText: string;
   isBusy: boolean;
@@ -59,6 +66,7 @@ type AgentComposerProps = {
   onOpenFiles: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onRemoveAttachedFile: (fileId: string) => void;
+  onSelectModelVariant: (variant: string | null) => void;
   onSend: () => void;
   sendDisabled: boolean;
   sessionCostFormulaGroups: Array<CostFormulaGroup>;
@@ -70,9 +78,12 @@ type AgentComposerProps = {
 
 export function AgentComposer({
   attachedFiles,
+  availableModelVariants,
+  canSelectModelVariant,
   composerPlaceholder,
   contextBreakdownRows,
   contextUsageText,
+  currentModelVariantLabel,
   filesScopeLabel,
   inputText,
   isBusy,
@@ -87,6 +98,7 @@ export function AgentComposer({
   onOpenFiles,
   onKeyDown,
   onRemoveAttachedFile,
+  onSelectModelVariant,
   onSend,
   sendDisabled,
   sessionCostFormulaGroups,
@@ -168,7 +180,51 @@ export function AgentComposer({
             ) : (
               <>
                 <p className="text-xs text-(--ink-soft)">{helperText}</p>
-                <p className="text-[11px] text-(--ink-soft)">Model: {modelLabel}</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-(--ink-soft)">
+                  <p>Model: {modelLabel}</p>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-left underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:cursor-default disabled:no-underline disabled:opacity-100"
+                        disabled={!canSelectModelVariant}
+                      >
+                        <span>Variant: {currentModelVariantLabel}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="start"
+                      className="agent-menu w-48 rounded-none border-2 shadow-[6px_6px_0_rgba(var(--shadow-ink),0.12)]"
+                    >
+                      <DropdownMenuLabel className="px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+                        Reasoning Variant
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator className="my-0 bg-(--border)/20" />
+                      <DropdownMenuRadioGroup
+                        value={currentModelVariantLabel === "default" ? "__default" : currentModelVariantLabel}
+                        onValueChange={(value) =>
+                          onSelectModelVariant(value === "__default" ? null : value)
+                        }
+                      >
+                        <DropdownMenuRadioItem
+                          value="__default"
+                          className="agent-menu-item rounded-none py-2"
+                        >
+                          Default
+                        </DropdownMenuRadioItem>
+                        {availableModelVariants.map((variant) => (
+                          <DropdownMenuRadioItem
+                            key={variant}
+                            value={variant}
+                            className="agent-menu-item rounded-none py-2"
+                          >
+                            {variant}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-(--ink-muted)">
                   <Popover>
                     <PopoverTrigger asChild>

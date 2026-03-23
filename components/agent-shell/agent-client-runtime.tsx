@@ -36,6 +36,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAgentUsage } from "@/hooks/agent/use-agent-usage";
 import {
+  buildAgentModelCatalog,
+  type ProviderCatalogListItem,
+} from "@/lib/agent/model-catalog";
+import {
   buildMessageStateFromStoredMessages,
   buildQuestionAnswer,
   buildSessionCostFormulaGroups,
@@ -60,7 +64,6 @@ import {
   sortStoredParts,
   toErrorMessage,
   toCompactJSON,
-  toModelCostInfo,
   toRuntimeToolCall,
   updateUserMessageText,
   upsertMessageEntry,
@@ -325,6 +328,84 @@ function getLatestAssistantModelLabel(storedMessages: Array<StoredMessage>): str
   return `${providerID}/${modelID}`;
 }
 
+function getStoredMessageModelSelection(message: StoredMessage): {
+  modelKey: string | null;
+  variant: string | null;
+} {
+  const info = message.info as Record<string, unknown>;
+  const nestedModel =
+    info.model && typeof info.model === "object" ? (info.model as Record<string, unknown>) : null;
+  const providerID =
+    typeof info.providerID === "string"
+      ? info.providerID
+      : typeof nestedModel?.providerID === "string"
+        ? nestedModel.providerID
+        : null;
+  const modelID =
+    typeof info.modelID === "string"
+      ? info.modelID
+      : typeof nestedModel?.modelID === "string"
+        ? nestedModel.modelID
+        : null;
+  const variant =
+    typeof info.variant === "string" && info.variant.trim().length > 0 ? info.variant.trim() : null;
+
+  return {
+    modelKey: providerID && modelID ? getModelKey(providerID, modelID) : null,
+    variant,
+  };
+}
+
+function getLatestUserModelSelection(storedMessages: Array<StoredMessage>): {
+  modelKey: string | null;
+  variant: string | null;
+} {
+  let latestUser: StoredMessage | null = null;
+
+  for (const message of storedMessages) {
+    if (message.info.role !== "user") continue;
+    if (!latestUser || message.info.time.created >= latestUser.info.time.created) {
+      latestUser = message;
+    }
+  }
+
+  return latestUser
+    ? getStoredMessageModelSelection(latestUser)
+    : {
+        modelKey: null,
+        variant: null,
+      };
+}
+
+function splitModelKey(modelKey: string): { providerID: string; modelID: string } | null {
+  const separatorIndex = modelKey.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex === modelKey.length - 1) return null;
+
+  return {
+    providerID: modelKey.slice(0, separatorIndex),
+    modelID: modelKey.slice(separatorIndex + 1),
+  };
+}
+
+function resolveStoredModelSelectionState(storedMessages: Array<StoredMessage>): {
+  selectedModelKey: string | null;
+  selectedVariantByModelKey: Record<string, string>;
+} {
+  const latestUserSelection = getLatestUserModelSelection(storedMessages);
+  const selectedModelKey =
+    latestUserSelection.modelKey ?? getLatestAssistantModelLabel(storedMessages) ?? null;
+
+  return {
+    selectedModelKey,
+    selectedVariantByModelKey:
+      latestUserSelection.modelKey && latestUserSelection.variant
+        ? {
+            [latestUserSelection.modelKey]: latestUserSelection.variant,
+          }
+        : {},
+  };
+}
+
 function buildBootstrapSessionState(bootstrap: AgentBootstrap): {
   isHydrated: boolean;
   messages: Array<MessageEntry>;
@@ -368,6 +449,9 @@ function isAbortError(error: unknown): boolean {
 
 export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProps) {
   const bootstrapSessionState = buildBootstrapSessionState(bootstrap);
+  const initialModelSelectionState = resolveStoredModelSelectionState(
+    bootstrapSessionState.storedMessages
+  );
   const pathname = usePathname();
   const router = useRouter();
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
@@ -376,6 +460,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
   const [availableSessions, setAvailableSessions] = useState<Array<SessionOption>>(
     bootstrap.availableSessions
+  );
+  const [availableModelVariantsByKey, setAvailableModelVariantsByKey] = useState<
+    Record<string, string[]>
+  >(bootstrap.modelCatalog.variants);
+  const [selectedModelKey, setSelectedModelKey] = useState<string | null>(
+    initialModelSelectionState.selectedModelKey
+  );
+  const [selectedVariantByModelKey, setSelectedVariantByModelKey] = useState<Record<string, string>>(
+    initialModelSelectionState.selectedVariantByModelKey
   );
   const [matterFileSummaryByMatterId, setMatterFileSummaryByMatterId] = useState(
     bootstrap.matterFileSummaryByMatterId
@@ -930,6 +1023,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         new Map<string, number>(Object.entries(catalog.contextLimits)),
         new Map<string, ModelCostInfo>(Object.entries(catalog.costs))
       );
+      setAvailableModelVariantsByKey(catalog.variants);
       return true;
     },
     [replaceModelCatalog]
@@ -948,28 +1042,41 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         return;
       }
 
-      const nextLimits = new Map<string, number>();
-      const nextCosts = new Map<string, ModelCostInfo>();
-      for (const provider of result.data?.all ?? []) {
-        const providerID = provider.id;
-        const models = provider.models ?? {};
-
-        for (const model of Object.values(models)) {
-          const modelKey = getModelKey(providerID, model.id);
-          const contextLimit = model.limit?.context;
-          if (typeof contextLimit === "number" && Number.isFinite(contextLimit)) {
-            nextLimits.set(modelKey, Math.max(0, Math.floor(contextLimit)));
-          }
-
-          const costInfo = toModelCostInfo(model.cost);
-          if (costInfo) nextCosts.set(modelKey, costInfo);
-        }
-      }
+      const nextCatalog = buildAgentModelCatalog(
+        (result.data?.all ?? []) as Array<ProviderCatalogListItem>
+      );
+      const nextLimits = new Map<string, number>(Object.entries(nextCatalog.contextLimits));
+      const nextCosts = new Map<string, ModelCostInfo>(Object.entries(nextCatalog.costs));
       replaceModelCatalog(nextLimits, nextCosts);
+      setAvailableModelVariantsByKey(nextCatalog.variants);
     } catch (error) {
       appendTrace(`provider metadata error: ${toErrorMessage(error)}`);
     }
   }, [appendTrace, ensureClients, replaceModelCatalog]);
+
+  const syncModelSelectionFromStoredMessages = useCallback(
+    (storedMessages: Array<StoredMessage>) => {
+      const latestUserSelection = getLatestUserModelSelection(storedMessages);
+      const fallbackModelKey = getLatestAssistantModelLabel(storedMessages) ?? null;
+      const nextModelKey = latestUserSelection.modelKey ?? fallbackModelKey;
+
+      setSelectedModelKey(nextModelKey);
+      setSelectedVariantByModelKey((current) => {
+        const next = { ...current };
+
+        if (latestUserSelection.modelKey) {
+          if (latestUserSelection.variant) {
+            next[latestUserSelection.modelKey] = latestUserSelection.variant;
+          } else {
+            delete next[latestUserSelection.modelKey];
+          }
+        }
+
+        return next;
+      });
+    },
+    []
+  );
 
   const refreshPendingInteractiveRequests = useCallback(async () => {
     if (interactiveRefreshInFlightRef.current) {
@@ -1200,6 +1307,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       const reconciled = reconcileMessageStateWithStoredMessages(storedMessages, preserveLive);
       replaceMessageState(reconciled.messages, reconciled.partsByMessageID);
       rebuildSessionUsageFromStoredMessages(storedMessages);
+      syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(reconciled.messages, reconciled.partsByMessageID);
       return reconciled.latestAssistantText;
     },
@@ -1208,6 +1316,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       rebuildEventCachesFromMessageState,
       rebuildSessionUsageFromStoredMessages,
       replaceMessageState,
+      syncModelSelectionFromStoredMessages,
     ]
   );
 
@@ -2005,6 +2114,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       );
 
       rebuildSessionUsageFromStoredMessages(storedMessages);
+      syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
       shouldAutoScrollRef.current = true;
       replaceMessageState(nextState.messages, nextState.partsByMessageID);
@@ -2084,6 +2194,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       replaceMessageState,
       resetSessionTokenTracking,
       scheduleInteractiveRefresh,
+      syncModelSelectionFromStoredMessages,
     ]
   );
 
@@ -2221,6 +2332,39 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       syncSessionFileSummary(resourceId, summary);
     },
     [syncMatterFileSummary, syncSessionFileSummary]
+  );
+
+  const currentModelKey = selectedModelKey ?? activeModelKey ?? null;
+  const availableModelVariants = currentModelKey
+    ? availableModelVariantsByKey[currentModelKey] ?? []
+    : [];
+  const currentModelVariant = (() => {
+    if (!currentModelKey) return null;
+    const candidate = selectedVariantByModelKey[currentModelKey];
+    return candidate && availableModelVariants.includes(candidate) ? candidate : null;
+  })();
+
+  const handleSelectModelVariant = useCallback(
+    (variant: string | null) => {
+      if (!currentModelKey) return;
+
+      setSelectedModelKey(currentModelKey);
+      setSelectedVariantByModelKey((current) => {
+        const next = { ...current };
+        if (variant) {
+          next[currentModelKey] = variant;
+        } else {
+          delete next[currentModelKey];
+        }
+        return next;
+      });
+      appendTrace(
+        variant
+          ? `model variant selected: ${currentModelKey} · ${variant}`
+          : `model variant reset: ${currentModelKey} · default`
+      );
+    },
+    [appendTrace, currentModelKey]
   );
 
   const handleOpenFiles = useCallback(() => {
@@ -2543,6 +2687,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         0
       );
       rebuildSessionUsageFromStoredMessages(storedMessages);
+      syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
       shouldAutoScrollRef.current = true;
       replaceMessageState(nextState.messages, nextState.partsByMessageID);
@@ -2639,6 +2784,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     refreshModelContextLimits,
     resetSessionTokenTracking,
     scheduleInteractiveRefresh,
+    syncModelSelectionFromStoredMessages,
   ]);
 
   const handleSelectMatter = useCallback(
@@ -2705,6 +2851,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return;
     }
     lastRouteSyncKeyRef.current = routeSyncKey;
+    const bootstrapModelSelectionState = resolveStoredModelSelectionState(
+      bootstrap.initialSessionSnapshot?.storedMessages ?? []
+    );
 
     setSelectedMatterID(bootstrap.initialMatterId ?? "");
     setSelectedSessionRecordID(bootstrap.initialSessionRecordId ?? "");
@@ -2716,6 +2865,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
     setAttachedFiles([]);
+    setSelectedModelKey(bootstrapModelSelectionState.selectedModelKey);
+    setSelectedVariantByModelKey(bootstrapModelSelectionState.selectedVariantByModelKey);
     setIsFilesDialogOpen(false);
     pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
@@ -2764,6 +2915,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setTimeline([]);
       setIsBusy(false);
       setRunUiPhase("thinking");
+      setSelectedModelKey(null);
+      setSelectedVariantByModelKey({});
       setPendingQuestions([]);
       setPendingPermissions([]);
       setQuestionDrafts({});
@@ -2886,6 +3039,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
+    const promptModel = currentModelKey ? splitModelKey(currentModelKey) : null;
+    const promptVariant = currentModelVariant ?? undefined;
     const nextAttachedFileRefs = attachedFiles.map((file) => ({
       path: file.relativePath,
       label: file.originalName,
@@ -2900,7 +3055,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     toolStateSeenRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
 
-    appendTrace(`prompt sent (${runtimePrompt.length} chars)`);
+    appendTrace(
+      promptModel
+        ? `prompt sent (${runtimePrompt.length} chars) [model: ${currentModelKey}${promptVariant ? ` · ${promptVariant}` : ""}]`
+        : `prompt sent (${runtimePrompt.length} chars)`
+    );
 
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
@@ -2944,6 +3103,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         assistantText: "",
         startObserved: false,
         pollRecoveryEligible: false,
+        model: currentModelKey
+          ? `${currentModelKey}${promptVariant ? ` · ${promptVariant}` : ""}`
+          : undefined,
         toolCalls: new Map<string, RuntimeToolCall>(),
         fail,
         finish,
@@ -2959,6 +3121,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       await client.session.promptAsync({
         sessionID: liveSessionID,
+        model: promptModel ?? undefined,
+        variant: promptVariant,
         parts: [{ type: "text", text: runtimePrompt }],
       });
 
@@ -2998,6 +3162,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     attachedFiles,
     appendUserCard,
     appendTrace,
+    currentModelKey,
+    currentModelVariant,
     ensureSession,
     inputText,
     isBusy,
@@ -3188,6 +3354,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setTimeline([]);
       setInputText("");
       setAttachedFiles([]);
+      setSelectedModelKey(null);
+      setSelectedVariantByModelKey({});
       setIsFilesDialogOpen(false);
       setIsUploadingFiles(false);
       setTraceLines([]);
@@ -3235,7 +3403,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return match?.[1] ?? "-";
     }
   })();
-  const modelLabel = activeModelKey ?? "-";
+  const modelLabel = currentModelKey ?? "-";
+  const modelVariantLabel = currentModelKey ? currentModelVariant ?? "default" : "-";
   const contextUsedEstimate = latestContextUsage ? getTokenUsageTotal(latestContextUsage) : 0;
   const contextUsagePercent =
     activeContextLimit && activeContextLimit > 0
@@ -3435,10 +3604,18 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
           <AgentComposer
             attachedFiles={attachedFiles}
+            availableModelVariants={availableModelVariants}
+            canSelectModelVariant={
+              Boolean(currentModelKey) &&
+              availableModelVariants.length > 0 &&
+              !isBusy &&
+              !isLoadingSelectedSession
+            }
             composerPlaceholder={composerPlaceholder}
             canManageFiles={Boolean(currentFilesResourceId)}
             contextBreakdownRows={contextBreakdownRows}
             contextUsageText={contextUsageText}
+            currentModelVariantLabel={modelVariantLabel}
             filesScopeLabel={activeFilesScope}
             inputText={inputText}
             isBusy={isBusy}
@@ -3452,6 +3629,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             onOpenFiles={handleOpenFiles}
             onKeyDown={handleComposerKeyDown}
             onRemoveAttachedFile={handleRemoveAttachedFile}
+            onSelectModelVariant={handleSelectModelVariant}
             onSend={() => void sendPrompt()}
             sendDisabled={
               !inputText.trim() ||

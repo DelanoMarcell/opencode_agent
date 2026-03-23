@@ -1,11 +1,13 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 
-import { getModelKey, toModelCostInfo } from "@/lib/agent-runtime/helpers";
 import type {
-  ModelCostInfo,
   SessionOption,
   StoredMessage,
 } from "@/lib/agent-runtime/types";
+import {
+  buildAgentModelCatalog,
+  type ProviderCatalogListItem,
+} from "@/lib/agent/model-catalog";
 import type {
   AgentBootstrapModelCatalog,
   AgentBootstrapSessionSnapshot,
@@ -20,49 +22,6 @@ function createServerOpencodeClient() {
   return createOpencodeClient({
     baseUrl: DEFAULT_OPENCODE_BASE_URL,
   });
-}
-
-type ProviderListItem = {
-  id: string;
-  models?: Record<
-    string,
-    {
-      id: string;
-      limit?: {
-        context?: number;
-      };
-      cost?: unknown;
-    }
-  >;
-};
-
-function buildModelCatalog(providers: Array<ProviderListItem>): AgentBootstrapModelCatalog {
-  const contextLimits: Record<string, number> = {};
-  const costs: Record<string, ModelCostInfo> = {};
-
-  for (const provider of providers) {
-    const providerID = provider.id;
-    const models = provider.models ?? {};
-
-    for (const model of Object.values(models)) {
-      const modelKey = getModelKey(providerID, model.id);
-      const contextLimit = model.limit?.context;
-      if (typeof contextLimit === "number" && Number.isFinite(contextLimit)) {
-        contextLimits[modelKey] = Math.max(0, Math.floor(contextLimit));
-      }
-
-      const costInfo = toModelCostInfo(model.cost);
-      if (costInfo) {
-        costs[modelKey] = costInfo;
-      }
-    }
-  }
-
-  return {
-    loaded: true,
-    contextLimits,
-    costs,
-  };
 }
 
 type FetchOpenCodeBootstrapOptions = {
@@ -99,11 +58,12 @@ export async function fetchOpenCodeBootstrap({
 
   const modelCatalog =
     providerResult && "data" in providerResult && !providerResult.error
-      ? buildModelCatalog(providerResult.data?.all ?? [])
+      ? buildAgentModelCatalog((providerResult.data?.all ?? []) as Array<ProviderCatalogListItem>)
       : {
           loaded: false,
           contextLimits: {},
           costs: {},
+          variants: {},
         };
 
   const availableSessions =

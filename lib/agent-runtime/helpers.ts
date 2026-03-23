@@ -626,6 +626,9 @@ export function buildTimelineFromMessageState(
 
     const parts = sortMessagePartEntries(partsByMessageID.get(message.id) ?? []);
     for (const part of parts) {
+      if (part.kind === "reasoning" && !part.running) {
+        continue;
+      }
       if (part.kind === "assistant-text" && !part.text.trim() && !part.running) {
         continue;
       }
@@ -717,6 +720,14 @@ export function isTextPartRunning(part: TextPart): boolean {
 }
 
 export function isStoredTextPartRunning(part: TextPart): boolean {
+  const time = "time" in part ? part.time : undefined;
+  if (!time || typeof time !== "object") return true;
+  return typeof (time as Record<string, unknown>).end !== "number";
+}
+
+export function isStoredReasoningPartRunning(
+  part: Extract<Part, { type: "reasoning" }>
+): boolean {
   const time = "time" in part ? part.time : undefined;
   if (!time || typeof time !== "object") return true;
   return typeof (time as Record<string, unknown>).end !== "number";
@@ -859,6 +870,17 @@ export function buildMessageStateFromStoredMessages(storedMessages: Array<Stored
 
     const parts: Array<MessagePartEntry> = [];
     for (const [partIndex, part] of sortStoredParts(message.parts).entries()) {
+      if (part.type === "reasoning") {
+        parts.push({
+          id: `reasoning-${part.id}`,
+          kind: "reasoning",
+          partID: part.id,
+          sortIndex: partIndex,
+          running: isStoredReasoningPartRunning(part),
+        });
+        continue;
+      }
+
       if (part.type === "text") {
         parts.push({
           id: `assistant-text-${part.id}`,
