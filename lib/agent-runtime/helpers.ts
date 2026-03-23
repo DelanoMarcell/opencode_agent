@@ -626,9 +626,6 @@ export function buildTimelineFromMessageState(
 
     const parts = sortMessagePartEntries(partsByMessageID.get(message.id) ?? []);
     for (const part of parts) {
-      if (part.kind === "reasoning" && !part.running) {
-        continue;
-      }
       if (part.kind === "assistant-text" && !part.text.trim() && !part.running) {
         continue;
       }
@@ -731,6 +728,24 @@ export function isStoredReasoningPartRunning(
   const time = "time" in part ? part.time : undefined;
   if (!time || typeof time !== "object") return true;
   return typeof (time as Record<string, unknown>).end !== "number";
+}
+
+export function getRunningStoredReasoningPartIDs(
+  storedMessages: Array<StoredMessage>
+): Set<string> {
+  const partIDs = new Set<string>();
+
+  for (const message of storedMessages) {
+    if (message.info.role !== "assistant") continue;
+
+    for (const part of message.parts) {
+      if (part.type !== "reasoning") continue;
+      if (!isStoredReasoningPartRunning(part)) continue;
+      partIDs.add(part.id);
+    }
+  }
+
+  return partIDs;
 }
 
 export function getLatestAssistantSnapshot(storedMessages: Array<StoredMessage>): {
@@ -870,17 +885,6 @@ export function buildMessageStateFromStoredMessages(storedMessages: Array<Stored
 
     const parts: Array<MessagePartEntry> = [];
     for (const [partIndex, part] of sortStoredParts(message.parts).entries()) {
-      if (part.type === "reasoning") {
-        parts.push({
-          id: `reasoning-${part.id}`,
-          kind: "reasoning",
-          partID: part.id,
-          sortIndex: partIndex,
-          running: isStoredReasoningPartRunning(part),
-        });
-        continue;
-      }
-
       if (part.type === "text") {
         parts.push({
           id: `assistant-text-${part.id}`,

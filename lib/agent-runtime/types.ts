@@ -32,13 +32,6 @@ export type TimelineItem =
     }
   | {
       id: string;
-      kind: "reasoning";
-      partID: string;
-      sortIndex?: number;
-      running: boolean;
-    }
-  | {
-      id: string;
       kind: "assistant-text";
       partID: string;
       sortIndex?: number;

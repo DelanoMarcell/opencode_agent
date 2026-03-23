@@ -52,6 +52,7 @@ import {
   getCreatedAt,
   getLatestAssistantSnapshot,
   getModelKey,
+  getRunningStoredReasoningPartIDs,
   getToolCallCacheSignature,
   getToolSignature,
   isTextPartRunning,
@@ -576,6 +577,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const messageRoleByIDRef = useRef<Map<string, "user" | "assistant">>(new Map());
   const partTextSeenRef = useRef<Map<string, string>>(new Map());
   const toolStateSeenRef = useRef<Map<string, string>>(new Map());
+  const reasoningPartIDsRef = useRef<Set<string>>(
+    getRunningStoredReasoningPartIDs(bootstrapSessionState.storedMessages)
+  );
   const activeAssistantServerMessageIDRef = useRef<string | null>(null);
   const activeRunRef = useRef<ActiveRun | null>(null);
   const timelineScrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -1167,6 +1171,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       messageRoleByIDRef.current.clear();
       partTextSeenRef.current.clear();
       toolStateSeenRef.current.clear();
+      reasoningPartIDsRef.current.clear();
       activeAssistantServerMessageIDRef.current = null;
 
       for (const message of sortMessageEntries(messages)) {
@@ -1191,6 +1196,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     },
     []
   );
+
+  const replaceReasoningPartIDCache = useCallback((storedMessages: Array<StoredMessage>) => {
+    reasoningPartIDsRef.current = getRunningStoredReasoningPartIDs(storedMessages);
+  }, []);
 
   const reconcileMessageStateWithStoredMessages = useCallback(
     (
@@ -1309,12 +1318,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       rebuildSessionUsageFromStoredMessages(storedMessages);
       syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(reconciled.messages, reconciled.partsByMessageID);
+      replaceReasoningPartIDCache(storedMessages);
       return reconciled.latestAssistantText;
     },
     [
       reconcileMessageStateWithStoredMessages,
       rebuildEventCachesFromMessageState,
       rebuildSessionUsageFromStoredMessages,
+      replaceReasoningPartIDCache,
       replaceMessageState,
       syncModelSelectionFromStoredMessages,
     ]
@@ -1629,6 +1640,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           activeRun.startObserved = true;
         }
 
+        if (reasoningPartIDsRef.current.has(partID)) return;
+
         const messageRole = messageRoleByIDRef.current.get(messageID);
         const existingMessage = findMessageEntry(messageEntriesRef.current, messageID);
         if (messageRole === "user" || existingMessage?.role === "user") {
@@ -1660,6 +1673,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         if (!currentSessionID || part.sessionID !== currentSessionID) return;
         if (activeRun && activeRun.sessionID === part.sessionID) {
           activeRun.startObserved = true;
+        }
+
+        if (part.type === "reasoning") {
+          reasoningPartIDsRef.current.add(part.id);
+          return;
         }
 
         if (part.type === "text") {
@@ -1767,6 +1785,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       if (event.type === "message.part.removed") {
         if (!currentSessionID || event.properties.sessionID !== currentSessionID) return;
+        reasoningPartIDsRef.current.delete(event.properties.partID);
 
         mutateMessageState((_, partsByMessageID) => {
           const parts = partsByMessageID.get(event.properties.messageID);
@@ -2096,6 +2115,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       pendingOptimisticUserRef.current = null;
       partTextSeenRef.current.clear();
       toolStateSeenRef.current.clear();
+      reasoningPartIDsRef.current.clear();
       activeAssistantServerMessageIDRef.current = null;
       activeRunRef.current = null;
       runCompletionInFlightRef.current = null;
@@ -2116,6 +2136,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       rebuildSessionUsageFromStoredMessages(storedMessages);
       syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
+      replaceReasoningPartIDCache(storedMessages);
       shouldAutoScrollRef.current = true;
       replaceMessageState(nextState.messages, nextState.partsByMessageID);
 
@@ -2651,6 +2672,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     pendingOptimisticUserRef.current = null;
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
+    reasoningPartIDsRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
     activeRunRef.current = null;
     runCompletionInFlightRef.current = null;
@@ -2689,6 +2711,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       rebuildSessionUsageFromStoredMessages(storedMessages);
       syncModelSelectionFromStoredMessages(storedMessages);
       rebuildEventCachesFromMessageState(nextState.messages, nextState.partsByMessageID);
+      replaceReasoningPartIDCache(storedMessages);
       shouldAutoScrollRef.current = true;
       replaceMessageState(nextState.messages, nextState.partsByMessageID);
       sessionIDRef.current = liveSelectedSessionID;
@@ -2909,6 +2932,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       messageRoleByIDRef.current.clear();
       partTextSeenRef.current.clear();
       toolStateSeenRef.current.clear();
+      reasoningPartIDsRef.current.clear();
       shouldAutoScrollRef.current = true;
       resetSessionTokenTracking();
       setSessionID(null);
@@ -3053,6 +3077,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
     partTextSeenRef.current.clear();
     toolStateSeenRef.current.clear();
+    reasoningPartIDsRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
 
     appendTrace(
@@ -3344,6 +3369,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       messageRoleByIDRef.current.clear();
       partTextSeenRef.current.clear();
       toolStateSeenRef.current.clear();
+      reasoningPartIDsRef.current.clear();
       activeAssistantServerMessageIDRef.current = null;
       resetSessionTokenTracking();
 
