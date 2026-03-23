@@ -31,7 +31,9 @@ import type {
 
 type Ms365AttachDialogProps = {
   disabled?: boolean;
+  isUploading?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onUploadFiles?: (files: Array<Ms365AttachmentSelection>) => Promise<boolean>;
   open?: boolean;
   showTrigger?: boolean;
 };
@@ -62,7 +64,9 @@ function formatDate(isoString?: string): string {
 
 export function Ms365AttachDialog({
   disabled = false,
+  isUploading = false,
   onOpenChange,
+  onUploadFiles,
   open: controlledOpen,
   showTrigger = true,
 }: Ms365AttachDialogProps) {
@@ -273,6 +277,20 @@ export function Ms365AttachDialog({
         ? "bg-(--brand) font-semibold text-(--brand-on)"
         : "text-(--ink) hover:bg-(--surface-hover)"
     }`;
+
+  const handleUpload = useCallback(async () => {
+    if (!onUploadFiles || selectedFiles.length === 0 || isUploading) {
+      return;
+    }
+
+    const didUpload = await onUploadFiles(selectedFiles);
+    if (!didUpload) {
+      return;
+    }
+
+    setSelectedByKey({});
+    setOpen(false);
+  }, [isUploading, onUploadFiles, selectedFiles, setOpen]);
 
   return (
     <>
@@ -627,11 +645,13 @@ export function Ms365AttachDialog({
               <Button
                 type="button"
                 className="agent-btn-primary rounded-none border-2 shadow-none"
-                disabled={selectedFiles.length === 0}
-                onClick={() => {}}
+                disabled={selectedFiles.length === 0 || isUploading}
+                onClick={() => void handleUpload()}
               >
-                <Paperclip className="size-4" />
-                {selectedFiles.length > 0
+                {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+                {isUploading
+                  ? "Uploading..."
+                  : selectedFiles.length > 0
                   ? `Upload ${selectedFiles.length} ${selectedFiles.length === 1 ? "File" : "Files"}`
                   : "Upload"}
               </Button>

@@ -2,11 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { buildStoredFileSummary } from "@/lib/files/summary";
-import type { StoredFileUploadResult } from "@/lib/files/types";
 import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
+import { importAllowedMs365File } from "@/lib/ms365/import";
+import type { Ms365ImportSelection } from "@/lib/ms365/types";
 import { MatterFile } from "@/lib/models/matter-file";
+import type { StoredFileUploadResult } from "@/lib/files/types";
 import {
   buildMatterFileSummary,
   findAccessibleMatterById,
@@ -27,43 +28,35 @@ type RouteContext = {
   }>;
 };
 
-function isUploadedFile(entry: FormDataEntryValue): entry is File {
-  return (
-    typeof entry === "object" &&
-    entry !== null &&
-    "arrayBuffer" in entry &&
-    "name" in entry &&
-    "size" in entry &&
-    typeof (entry as File).name === "string" &&
-    typeof (entry as File).size === "number" &&
-    (entry as File).size > 0
-  );
-}
-
 function buildChecksumSha256(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export async function GET(_: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedOrganisationUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+function parseSelections(value: unknown): Array<Ms365ImportSelection> {
+  if (!Array.isArray(value)) {
+    return [];
   }
 
-  const { id } = await params;
-  await connectDB();
+  return value.flatMap((entry) => {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      typeof (entry as Ms365ImportSelection).locationId !== "string" ||
+      typeof (entry as Ms365ImportSelection).driveId !== "string" ||
+      typeof (entry as Ms365ImportSelection).itemId !== "string"
+    ) {
+      return [];
+    }
 
-  const matter = await findAccessibleMatterById(id, user.id, user.organisationId);
-  if (!matter) {
-    return NextResponse.json({ error: "Matter not found" }, { status: 404 });
-  }
+    const locationId = (entry as Ms365ImportSelection).locationId.trim();
+    const driveId = (entry as Ms365ImportSelection).driveId.trim();
+    const itemId = (entry as Ms365ImportSelection).itemId.trim();
 
-  const files = await listMatterFilesForMatter(id, user.organisationId);
+    if (!locationId || !driveId || !itemId) {
+      return [];
+    }
 
-  return NextResponse.json({
-    files: files.map(serializeMatterFile),
-    summary: buildMatterFileSummary(files),
-    matterId: matter._id.toString(),
+    return [{ locationId, driveId, itemId }];
   });
 }
 
@@ -81,11 +74,14 @@ export async function POST(req: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Matter not found" }, { status: 404 });
   }
 
-  const formData = await req.formData();
-  const filesToUpload = formData.getAll("files").filter(isUploadedFile);
+  const body = (await req.json().catch(() => null)) as { files?: unknown } | null;
+  const selections = parseSelections(body?.files);
 
-  if (filesToUpload.length === 0) {
-    return NextResponse.json({ error: "At least one file is required" }, { status: 400 });
+  if (selections.length === 0) {
+    return NextResponse.json(
+      { error: "At least one Microsoft 365 file is required" },
+      { status: 400 }
+    );
   }
 
   const existingStoredNames = await listStoredMatterFileNamesForMatter(matter._id);
@@ -95,9 +91,12 @@ export async function POST(req: Request, { params }: RouteContext) {
   const uploadResults: Array<StoredFileUploadResult> = [];
 
   try {
-    for (const [index, file] of filesToUpload.entries()) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const checksumSha256 = buildChecksumSha256(bytes);
+    for (const [index, selection] of selections.entries()) {
+      const importedFile = await importAllowedMs365File({
+        organisationId: user.organisationId,
+        selection,
+      });
+      const checksumSha256 = buildChecksumSha256(importedFile.bytes);
       const existingDuplicate = await MatterFile.findOne({
         matterId: matter._id,
         checksumSha256,
@@ -129,12 +128,15 @@ export async function POST(req: Request, { params }: RouteContext) {
       let didPersistOrSkip = false;
 
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const storedName = buildStoredSessionFileName(file.name, reservedStoredNames);
+        const storedName = buildStoredSessionFileName(
+          importedFile.originalName,
+          reservedStoredNames
+        );
         const { relativePath } = await saveMatterFileToDisk(
           user.organisationName,
           matter.code,
           storedName,
-          bytes
+          importedFile.bytes
         );
 
         try {
@@ -142,13 +144,17 @@ export async function POST(req: Request, { params }: RouteContext) {
             organisationId: matter.organisationId,
             matterId: matter._id,
             fileId,
-            originalName: file.name,
-            source: "device",
+            originalName: importedFile.originalName,
+            source: "ms365",
+            ms365LocationId: importedFile.ms365LocationId,
+            ms365DriveId: importedFile.ms365DriveId,
+            ms365ItemId: importedFile.ms365ItemId,
+            ms365WebUrl: importedFile.webUrl,
             storedName,
             relativePath,
             checksumSha256,
-            mime: file.type || undefined,
-            size: file.size,
+            mime: importedFile.mime,
+            size: importedFile.size,
             createdByUserId: user.id,
           });
 
@@ -203,7 +209,9 @@ export async function POST(req: Request, { params }: RouteContext) {
       }
 
       if (!didPersistOrSkip) {
-        throw new Error(`Failed to allocate a stored filename for ${file.name}`);
+        throw new Error(
+          `Failed to allocate a stored filename for ${importedFile.originalName}`
+        );
       }
     }
 
@@ -212,12 +220,12 @@ export async function POST(req: Request, { params }: RouteContext) {
     return NextResponse.json(
       {
         files: files.map(serializeMatterFile),
-        summary: buildStoredFileSummary(files),
+        summary: buildMatterFileSummary(files),
         uploadResults,
       },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
     if (createdFileIds.length > 0) {
       await MatterFile.deleteMany({ fileId: { $in: createdFileIds } });
     }
@@ -226,55 +234,14 @@ export async function POST(req: Request, { params }: RouteContext) {
       await deleteSessionFileFromRelativePath(writtenFile.relativePath);
     }
 
-    return NextResponse.json({ error: "Failed to upload matter files" }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to upload Microsoft 365 matter files",
+      },
+      { status: 500 }
+    );
   }
-}
-
-export async function DELETE(req: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedOrganisationUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { id } = await params;
-  await connectDB();
-
-  const matter = await findAccessibleMatterById(id, user.id, user.organisationId);
-  if (!matter) {
-    return NextResponse.json({ error: "Matter not found" }, { status: 404 });
-  }
-
-  const payload = (await req.json().catch(() => null)) as { fileIds?: unknown } | null;
-  const fileIds = Array.isArray(payload?.fileIds)
-    ? payload.fileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    : [];
-
-  if (fileIds.length === 0) {
-    return NextResponse.json({ error: "fileIds must contain at least one file id" }, { status: 400 });
-  }
-
-  const uniqueFileIds = Array.from(new Set(fileIds));
-  const files = await MatterFile.find({
-    fileId: { $in: uniqueFileIds },
-    matterId: matter._id,
-    organisationId: matter.organisationId,
-  }).lean();
-
-  for (const file of files) {
-    await deleteSessionFileFromRelativePath(file.relativePath);
-  }
-
-  if (files.length > 0) {
-    await MatterFile.deleteMany({
-      _id: { $in: files.map((file) => file._id) },
-    });
-  }
-
-  const remainingFiles = await listMatterFilesForMatter(id, user.organisationId);
-
-  return NextResponse.json({
-    deletedFileIds: files.map((file) => file.fileId),
-    files: remainingFiles.map(serializeMatterFile),
-    summary: buildMatterFileSummary(remainingFiles),
-  });
 }

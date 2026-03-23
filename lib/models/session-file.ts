@@ -33,6 +33,28 @@ const sessionFileSchema = new Schema(
       required: true,
       trim: true,
     },
+    source: {
+      type: String,
+      required: true,
+      enum: ["device", "ms365"],
+      trim: true,
+    },
+    ms365LocationId: {
+      type: String,
+      trim: true,
+    },
+    ms365DriveId: {
+      type: String,
+      trim: true,
+    },
+    ms365ItemId: {
+      type: String,
+      trim: true,
+    },
+    ms365WebUrl: {
+      type: String,
+      trim: true,
+    },
     storedName: {
       type: String,
       required: true,
@@ -91,6 +113,11 @@ Example document:
   rawSessionId: "ses_abc123xyz789",
   fileId: "sf_abc123xyz789",
   originalName: "termination-letter.pdf",
+  source: "device",
+  ms365LocationId: undefined,
+  ms365DriveId: undefined,
+  ms365ItemId: undefined,
+  ms365WebUrl: undefined,
   storedName: "termination-letter (1).pdf",
   relativePath: "LNP/ses_abc123xyz789/termination-letter (1).pdf",
   checksumSha256: "7b7f3d2f0b7f5a39d9d7ec3a6a4a7e8f2f5e8910213e2f3cd1ab23cd45ef6789",

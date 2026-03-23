@@ -33,3 +33,9 @@ export type Ms365AttachmentSelection = Ms365BrowserItem & {
   locationId: string;
   locationLabel: string;
 };
+
+export type Ms365ImportSelection = {
+  locationId: string;
+  driveId: string;
+  itemId: string;
+};

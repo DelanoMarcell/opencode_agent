@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 import { getAuthenticatedOrganisationUser } from "@/lib/auth-session";
 import { connectDB } from "@/lib/mongodb";
+import { importAllowedMs365File } from "@/lib/ms365/import";
+import type { Ms365ImportSelection } from "@/lib/ms365/types";
 import { SessionFile } from "@/lib/models/session-file";
 import type { SessionFileUploadResult } from "@/lib/session-files/types";
 import {
@@ -26,43 +28,35 @@ type RouteContext = {
   }>;
 };
 
-function isUploadedFile(entry: FormDataEntryValue): entry is File {
-  return (
-    typeof entry === "object" &&
-    entry !== null &&
-    "arrayBuffer" in entry &&
-    "name" in entry &&
-    "size" in entry &&
-    typeof (entry as File).name === "string" &&
-    typeof (entry as File).size === "number" &&
-    (entry as File).size > 0
-  );
-}
-
 function buildChecksumSha256(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export async function GET(_: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedOrganisationUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+function parseSelections(value: unknown): Array<Ms365ImportSelection> {
+  if (!Array.isArray(value)) {
+    return [];
   }
 
-  const { sessionId } = await params;
-  await connectDB();
+  return value.flatMap((entry) => {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      typeof (entry as Ms365ImportSelection).locationId !== "string" ||
+      typeof (entry as Ms365ImportSelection).driveId !== "string" ||
+      typeof (entry as Ms365ImportSelection).itemId !== "string"
+    ) {
+      return [];
+    }
 
-  const sessionRecord = await findAccessibleSessionRecordByRawSessionId(sessionId, user.organisationId);
-  if (!sessionRecord) {
-    return NextResponse.json({ error: "Session record not found" }, { status: 404 });
-  }
+    const locationId = (entry as Ms365ImportSelection).locationId.trim();
+    const driveId = (entry as Ms365ImportSelection).driveId.trim();
+    const itemId = (entry as Ms365ImportSelection).itemId.trim();
 
-  const files = await listSessionFilesForSession(sessionId, user.organisationId);
+    if (!locationId || !driveId || !itemId) {
+      return [];
+    }
 
-  return NextResponse.json({
-    files: files.map(serializeSessionFile),
-    summary: buildSessionFileSummary(files),
-    sessionRecordId: sessionRecord._id.toString(),
+    return [{ locationId, driveId, itemId }];
   });
 }
 
@@ -75,16 +69,22 @@ export async function POST(req: Request, { params }: RouteContext) {
   const { sessionId } = await params;
   await connectDB();
 
-  const sessionRecord = await findAccessibleSessionRecordByRawSessionId(sessionId, user.organisationId);
+  const sessionRecord = await findAccessibleSessionRecordByRawSessionId(
+    sessionId,
+    user.organisationId
+  );
   if (!sessionRecord) {
     return NextResponse.json({ error: "Session record not found" }, { status: 404 });
   }
 
-  const formData = await req.formData();
-  const filesToUpload = formData.getAll("files").filter(isUploadedFile);
+  const body = (await req.json().catch(() => null)) as { files?: unknown } | null;
+  const selections = parseSelections(body?.files);
 
-  if (filesToUpload.length === 0) {
-    return NextResponse.json({ error: "At least one file is required" }, { status: 400 });
+  if (selections.length === 0) {
+    return NextResponse.json(
+      { error: "At least one Microsoft 365 file is required" },
+      { status: 400 }
+    );
   }
 
   const existingStoredNames = await listStoredSessionFileNamesForSession(sessionRecord._id);
@@ -94,9 +94,12 @@ export async function POST(req: Request, { params }: RouteContext) {
   const uploadResults: Array<SessionFileUploadResult> = [];
 
   try {
-    for (const [index, file] of filesToUpload.entries()) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const checksumSha256 = buildChecksumSha256(bytes);
+    for (const [index, selection] of selections.entries()) {
+      const importedFile = await importAllowedMs365File({
+        organisationId: user.organisationId,
+        selection,
+      });
+      const checksumSha256 = buildChecksumSha256(importedFile.bytes);
       const existingDuplicate = await SessionFile.findOne({
         opencodeSessionId: sessionRecord._id,
         checksumSha256,
@@ -129,12 +132,15 @@ export async function POST(req: Request, { params }: RouteContext) {
       let didPersistOrSkip = false;
 
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const storedName = buildStoredSessionFileName(file.name, reservedStoredNames);
+        const storedName = buildStoredSessionFileName(
+          importedFile.originalName,
+          reservedStoredNames
+        );
         const { relativePath } = await saveSessionFileToDisk(
           user.organisationName,
           sessionId,
           storedName,
-          bytes
+          importedFile.bytes
         );
 
         try {
@@ -143,13 +149,17 @@ export async function POST(req: Request, { params }: RouteContext) {
             opencodeSessionId: sessionRecord._id,
             rawSessionId: sessionId,
             fileId,
-            originalName: file.name,
-            source: "device",
+            originalName: importedFile.originalName,
+            source: "ms365",
+            ms365LocationId: importedFile.ms365LocationId,
+            ms365DriveId: importedFile.ms365DriveId,
+            ms365ItemId: importedFile.ms365ItemId,
+            ms365WebUrl: importedFile.webUrl,
             storedName,
             relativePath,
             checksumSha256,
-            mime: file.type || undefined,
-            size: file.size,
+            mime: importedFile.mime,
+            size: importedFile.size,
             createdByUserId: user.id,
           });
 
@@ -205,7 +215,9 @@ export async function POST(req: Request, { params }: RouteContext) {
       }
 
       if (!didPersistOrSkip) {
-        throw new Error(`Failed to allocate a stored filename for ${file.name}`);
+        throw new Error(
+          `Failed to allocate a stored filename for ${importedFile.originalName}`
+        );
       }
     }
 
@@ -219,7 +231,7 @@ export async function POST(req: Request, { params }: RouteContext) {
       },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
     if (createdFileIds.length > 0) {
       await SessionFile.deleteMany({ fileId: { $in: createdFileIds } });
     }
@@ -228,55 +240,14 @@ export async function POST(req: Request, { params }: RouteContext) {
       await deleteSessionFileFromRelativePath(writtenFile.relativePath);
     }
 
-    return NextResponse.json({ error: "Failed to upload session files" }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to upload Microsoft 365 session files",
+      },
+      { status: 500 }
+    );
   }
-}
-
-export async function DELETE(req: Request, { params }: RouteContext) {
-  const user = await getAuthenticatedOrganisationUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { sessionId } = await params;
-  await connectDB();
-
-  const sessionRecord = await findAccessibleSessionRecordByRawSessionId(sessionId, user.organisationId);
-  if (!sessionRecord) {
-    return NextResponse.json({ error: "Session record not found" }, { status: 404 });
-  }
-
-  const payload = (await req.json().catch(() => null)) as { fileIds?: unknown } | null;
-  const fileIds = Array.isArray(payload?.fileIds)
-    ? payload.fileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    : [];
-
-  if (fileIds.length === 0) {
-    return NextResponse.json({ error: "fileIds must contain at least one file id" }, { status: 400 });
-  }
-
-  const uniqueFileIds = Array.from(new Set(fileIds));
-  const files = await SessionFile.find({
-    fileId: { $in: uniqueFileIds },
-    rawSessionId: sessionId,
-    organisationId: sessionRecord.organisationId,
-  }).lean();
-
-  for (const file of files) {
-    await deleteSessionFileFromRelativePath(file.relativePath);
-  }
-
-  if (files.length > 0) {
-    await SessionFile.deleteMany({
-      _id: { $in: files.map((file) => file._id) },
-    });
-  }
-
-  const remainingFiles = await listSessionFilesForSession(sessionId, user.organisationId);
-
-  return NextResponse.json({
-    deletedFileIds: files.map((file) => file.fileId),
-    files: remainingFiles.map(serializeSessionFile),
-    summary: buildSessionFileSummary(remainingFiles),
-  });
 }

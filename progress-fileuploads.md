@@ -46,6 +46,19 @@
   - SharePoint locations are now managed through `/ms365/allowlist`
   - the attach dialog is currently a browser only
   - MS365 files are not yet stored into the session or matter local file libraries
+- [done] Add Microsoft 365 import into the local file libraries:
+  - session imports go through `POST /api/opencode-sessions/[sessionId]/files/ms365`
+  - matter imports go through `POST /api/matters/[id]/files/ms365`
+  - the browser sends only `locationId`, `driveId`, and `itemId` to the backend
+  - the backend revalidates the item against the allowed location scope before downloading it
+  - the backend fetches the temporary Graph download URL server-side and saves the bytes into the existing local file libraries
+- [done] Extend stored file metadata to capture origin:
+  - `source: "device" | "ms365"`
+  - optional `ms365LocationId`
+  - optional `ms365DriveId`
+  - optional `ms365ItemId`
+  - optional `ms365WebUrl`
+- [done] Surface the new origin in the shared files dialog with a `Source` column for both session and matter files
 - [done] Verify the end-to-end storage/list/delete flow and update this file with final status
 
 - [next] Define the assistant attach model on top of the current session and matter libraries
@@ -86,7 +99,7 @@
 - MS365 is not yet part of that canonical library layer:
   - locations are stored in Mongo
   - browsing works
-  - import into the local file libraries is still pending
+  - selected Microsoft 365 files can now be imported into the same local file libraries as device uploads
 - Assistant-facing attach behavior is still intentionally deferred:
   - no hidden runtime prompt injection yet
   - no file-aware model behavior yet

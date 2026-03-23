@@ -9,6 +9,11 @@ import { MatterMember } from "@/lib/models/matter-member";
 type SerializableMatterFile = {
   fileId: string;
   originalName: string;
+  source?: "device" | "ms365";
+  ms365LocationId?: string | null;
+  ms365DriveId?: string | null;
+  ms365ItemId?: string | null;
+  ms365WebUrl?: string | null;
   mime?: string | null;
   size: number;
   createdAt: Date;
@@ -22,6 +27,11 @@ export function serializeMatterFile(file: SerializableMatterFile): StoredFileLis
   return {
     fileId: file.fileId,
     originalName: file.originalName,
+    source: file.source === "ms365" ? "ms365" : "device",
+    ms365LocationId: file.ms365LocationId ?? undefined,
+    ms365DriveId: file.ms365DriveId ?? undefined,
+    ms365ItemId: file.ms365ItemId ?? undefined,
+    ms365WebUrl: file.ms365WebUrl ?? undefined,
     mime: file.mime ?? undefined,
     size: file.size,
     createdAt: file.createdAt.toISOString(),

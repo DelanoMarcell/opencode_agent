@@ -27,6 +27,28 @@ const matterFileSchema = new Schema(
       required: true,
       trim: true,
     },
+    source: {
+      type: String,
+      required: true,
+      enum: ["device", "ms365"],
+      trim: true,
+    },
+    ms365LocationId: {
+      type: String,
+      trim: true,
+    },
+    ms365DriveId: {
+      type: String,
+      trim: true,
+    },
+    ms365ItemId: {
+      type: String,
+      trim: true,
+    },
+    ms365WebUrl: {
+      type: String,
+      trim: true,
+    },
     storedName: {
       type: String,
       required: true,

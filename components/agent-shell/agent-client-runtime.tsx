@@ -95,6 +95,7 @@ import type {
   StoredFileSummary,
   StoredFileUploadResult,
 } from "@/lib/files/types";
+import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_OPENCODE_BASE_URL ?? "http://localhost:4096";
@@ -161,6 +162,12 @@ function buildFilesApiEndpoint(scope: FilesDialogScope, resourceId: string) {
   return scope === "matter"
     ? `/api/matters/${encodeURIComponent(resourceId)}/files`
     : `/api/opencode-sessions/${encodeURIComponent(resourceId)}/files`;
+}
+
+function buildMs365FilesApiEndpoint(scope: FilesDialogScope, resourceId: string) {
+  return scope === "matter"
+    ? `/api/matters/${encodeURIComponent(resourceId)}/files/ms365`
+    : `/api/opencode-sessions/${encodeURIComponent(resourceId)}/files/ms365`;
 }
 
 function buildChatRoute(sessionRecordID: string, matterID?: string) {
@@ -2251,6 +2258,69 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [appendTrace, handleFilesSummaryChange, selectedMatterID, selectedSessionID]
   );
 
+  const handleMs365FilesUpload = useCallback(
+    async (files: Array<Ms365AttachmentSelection>) => {
+      const scope: FilesDialogScope = selectedMatterID ? "matter" : "session";
+      const resourceId = scope === "matter" ? selectedMatterID : selectedSessionID;
+
+      if (!resourceId) {
+        setErrorText(
+          scope === "matter"
+            ? "Open a matter folder before uploading files into it."
+            : "Open a chat session before uploading files into it."
+        );
+        return null;
+      }
+
+      setIsUploadingFiles(true);
+      setErrorText(null);
+
+      try {
+        const response = await fetch(buildMs365FilesApiEndpoint(scope, resourceId), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            files: files.map((file) => ({
+              locationId: file.locationId,
+              driveId: file.driveId,
+              itemId: file.id,
+            })),
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              files?: Array<StoredFileListItem>;
+              summary?: StoredFileSummary;
+              uploadResults?: Array<StoredFileUploadResult>;
+              error?: string;
+            }
+          | null;
+
+        if (!response.ok || !payload?.summary || !payload?.files) {
+          throw new Error(payload?.error ?? `Failed to upload ${scope} Microsoft 365 files`);
+        }
+
+        handleFilesSummaryChange(scope, resourceId, payload.summary);
+        appendTrace(`${scope} Microsoft 365 files uploaded: ${files.length}`);
+        return {
+          files: payload.files,
+          summary: payload.summary,
+          uploadResults: payload.uploadResults ?? [],
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        setErrorText(message);
+        appendTrace(`${scope} Microsoft 365 file upload error: ${message}`);
+        return null;
+      } finally {
+        setIsUploadingFiles(false);
+      }
+    },
+    [appendTrace, handleFilesSummaryChange, selectedMatterID, selectedSessionID]
+  );
+
   const assignSessionRecordToMatter = useCallback(
     async (sessionRecord: AgentBootstrapSessionRecord, matterID: string) => {
       const response = await fetch(`/api/matters/${matterID}/sessions`, {
@@ -3323,6 +3393,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               refreshDialog: false,
             })
           }
+          onAddMs365Files={handleMs365FilesUpload}
           open={isFilesDialogOpen}
           scope={activeFilesScope}
           resourceId={currentFilesResourceId}

@@ -39,9 +39,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Ms365AttachDialog } from "@/components/agent-shell/ms365-attach-dialog";
 import type {
   StoredFileListItem,
+  StoredFileSource,
   StoredFileSummary,
   StoredFileUploadResult,
 } from "@/lib/files/types";
+import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 type FilesDialogScope = "session" | "matter";
 
@@ -50,6 +52,13 @@ type SessionFilesDialogProps = {
   isUploadingFiles: boolean;
   onAddFiles: (
     files: Array<File>
+  ) => Promise<{
+    files: Array<StoredFileListItem>;
+    summary: StoredFileSummary;
+    uploadResults: Array<StoredFileUploadResult>;
+  } | null>;
+  onAddMs365Files: (
+    files: Array<Ms365AttachmentSelection>
   ) => Promise<{
     files: Array<StoredFileListItem>;
     summary: StoredFileSummary;
@@ -85,6 +94,7 @@ type PendingUploadRow = {
   mime?: string;
   originalName: string;
   size: number;
+  source: StoredFileSource;
   status: PendingUploadStatus;
   uploadIndex: number;
 };
@@ -129,6 +139,10 @@ function formatMimeType(mime: string | null | undefined): string {
   return (parts[parts.length - 1] ?? subtype).toUpperCase();
 }
 
+function formatFileSource(source: StoredFileSource): string {
+  return source === "ms365" ? "Microsoft 365" : "Device";
+}
+
 function getScopeLabel(scope: FilesDialogScope) {
   return scope === "matter" ? "matter" : "session";
 }
@@ -159,6 +173,7 @@ export function SessionFilesDialog({
   canUploadFiles,
   isUploadingFiles,
   onAddFiles,
+  onAddMs365Files,
   open,
   scope,
   resourceId,
@@ -469,6 +484,7 @@ export function SessionFilesDialog({
         mime: file.type || undefined,
         originalName: file.name,
         size: file.size,
+        source: "device" as const,
         status: "uploading" as const,
         uploadIndex,
       }));
@@ -552,8 +568,89 @@ export function SessionFilesDialog({
         />
         <Ms365AttachDialog
           disabled={!resourceId}
+          isUploading={isUploadingFiles}
           open={isMs365DialogOpen}
           onOpenChange={setIsMs365DialogOpen}
+          onUploadFiles={async (selectedFiles) => {
+            if (selectedFiles.length === 0) {
+              return false;
+            }
+
+            const createdAt = new Date().toISOString();
+            const optimisticUploads = selectedFiles.map((file, uploadIndex) => ({
+              createdAt,
+              fileId: `pending_${crypto.randomUUID()}`,
+              mime: undefined,
+              originalName: file.name,
+              size: file.size ?? 0,
+              source: "ms365" as const,
+              status: "uploading" as const,
+              uploadIndex,
+            }));
+
+            setPendingUploads((current) => [...optimisticUploads, ...current]);
+            const uploadResult = await onAddMs365Files(selectedFiles);
+
+            if (uploadResult && resourceId) {
+              setFiles(uploadResult.files);
+              setSelectedFileIds((current) => {
+                const next = new Set<string>();
+                const validFileIds = new Set(uploadResult.files.map((file) => file.fileId));
+                for (const fileId of current) {
+                  if (validFileIds.has(fileId)) {
+                    next.add(fileId);
+                  }
+                }
+                return next;
+              });
+              onSummaryChange(scope, resourceId, uploadResult.summary);
+              const uploadResultByIndex = new Map(
+                uploadResult.uploadResults.map((result) => [result.index, result])
+              );
+              const optimisticUploadIds = optimisticUploads.map((upload) => upload.fileId);
+              const failedUploadIds = optimisticUploads
+                .filter((upload) => !uploadResultByIndex.has(upload.uploadIndex))
+                .map((upload) => upload.fileId);
+              const failedUploadIdSet = new Set(failedUploadIds);
+
+              setPendingUploads((current) =>
+                current.flatMap((upload) => {
+                  if (!optimisticUploadIds.includes(upload.fileId)) {
+                    return [upload];
+                  }
+
+                  if (failedUploadIdSet.has(upload.fileId)) {
+                    return [
+                      {
+                        ...upload,
+                        status: "failed",
+                      },
+                    ];
+                  }
+
+                  return [];
+                })
+              );
+              if (failedUploadIds.length > 0) {
+                schedulePendingUploadRemoval(failedUploadIds, 3200);
+              }
+              return true;
+            }
+
+            const optimisticUploadIds = optimisticUploads.map((upload) => upload.fileId);
+            setPendingUploads((current) =>
+              current.map((upload) =>
+                optimisticUploadIds.includes(upload.fileId)
+                  ? {
+                      ...upload,
+                      status: "failed",
+                    }
+                  : upload
+              )
+            );
+            schedulePendingUploadRemoval(optimisticUploadIds, 3200);
+            return false;
+          }}
           showTrigger={false}
         />
 
@@ -658,6 +755,7 @@ export function SessionFilesDialog({
                       />
                     </div>
                     <div className="min-w-0 flex-1 px-2 py-3">Name</div>
+                    <div className="w-28 shrink-0 px-2 py-3">Source</div>
                     <div className="w-14 shrink-0 px-2 py-3">Type</div>
                     <div className="w-16 shrink-0 px-2 py-3">Size</div>
                     <div className="w-24 shrink-0 px-2 py-3">Added</div>
@@ -706,6 +804,9 @@ export function SessionFilesDialog({
                                 </span>
                               </div>
                             </div>
+                            <div className="w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                              {formatFileSource(upload.source)}
+                            </div>
                             <div className="w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft)" title={upload.mime ?? undefined}>
                               {formatMimeType(upload.mime)}
                             </div>
@@ -745,6 +846,9 @@ export function SessionFilesDialog({
                                   {file.originalName}
                                 </span>
                               </div>
+                            </div>
+                            <div className="w-28 shrink-0 px-2 py-3 text-sm text-(--ink-soft)">
+                              {formatFileSource(file.source)}
                             </div>
                             <div className="w-14 shrink-0 px-2 py-3 text-sm text-(--ink-soft)" title={file.mime ?? undefined}>
                               {formatMimeType(file.mime)}
