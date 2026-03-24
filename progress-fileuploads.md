@@ -95,13 +95,12 @@
 
 - [next] Restore attachment awareness when stored messages come back from OpenCode:
   - verify the hydration/reconciliation path behaves cleanly across longer conversations and compaction
-- [next] Add hidden default file-library scope guidance even when no explicit files are attached:
-  - when a chat has a session or matter file library but the user has not explicitly attached files for this message, the model should still be told about that library in hidden runtime context
-  - that hidden prompt should make clear that no explicit attachments were provided for this request
-  - that hidden prompt should also include how many files are currently in that session or matter library so the model knows whether there are any uploaded files it can even try to use
-  - it should tell the model that if the user asks about uploaded files, this library is the only directory it may use for uploaded-file work
-  - it should tell the model not to use any other local files outside that session or matter library unless the user explicitly asks
-  - this hidden library-scope prompt must not be rendered back to the user in the visible chat UI
+- [done] Add hidden default file-library scope guidance even when no explicit files are attached:
+  - when a chat has a session or matter file library but the user has not explicitly attached files for this message, the model is now told about that library in hidden runtime context
+  - the hidden prompt now makes clear that no explicit attachments were provided for this request
+  - the hidden prompt includes how many files are currently in that session or matter library so the model knows whether there are any uploaded files it can even try to use
+  - it tells the model that if the user asks about uploaded files, this library is the only directory it may use for uploaded-file work
+  - the hidden library-scope prompt is stripped from visible chat rendering the same way as `<attached_files>`
 - [next] Define the exact composer/runtime attach UX:
   - whether the current first-few-plus-summary composer strip is sufficient
   - whether hidden attachments beyond the preview need their own expandable review surface before send
@@ -128,8 +127,8 @@
   - Microsoft 365 import into the same local libraries
   - first-pass transient attach state and raw prompt injection
 - The filesystem contract is:
-  - `.agent/<organisationName>/session-files/<rawSessionId>/`
-  - `.agent/<organisationName>/matter-files/<matterCode>/`
+  - `agent/<organisationName>/session-files/<rawSessionId>/`
+  - `agent/<organisationName>/matter-files/<matterCode>/`
 - The current library split is now confirmed:
   - general chats use the session library
   - matter chats use the matter library
@@ -142,8 +141,8 @@
 - Assistant-facing attach behavior is still intentionally deferred:
   - the agreed first version is transient per-message attach state only, and that first attach slice is now implemented
   - attached files are currently passed to the model via a raw `<attached_files>` runtime block appended below the user text
-  - hidden attachment context still needs to be stripped from visible message text on hydration
-  - attached-file pills still need to be rendered from parsed stored-message paths
+  - hidden attached-file and uploaded-library context is now stripped from visible message text on hydration
+  - attached-file pills are now rendered from parsed stored-message paths
   - no persisted "selected for assistant use" state should be introduced
   - no file search or extraction pipeline is planned for this first attach pass
 - Verification completed with `git diff --check`; bounded `tsc --noEmit` and targeted `eslint` runs timed out in this repo without returning diagnostics

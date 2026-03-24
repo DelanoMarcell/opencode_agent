@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { type CSSProperties, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Search, X } from "lucide-react";
 
@@ -24,6 +24,8 @@ type ModelAllowlistResponse = {
   availableModels: Array<AvailableModel>;
   error?: string;
 };
+
+const MASKED_TEXT_INPUT_STYLE = { WebkitTextSecurity: "disc" } as CSSProperties;
 
 export default function ModelsAllowlistPage() {
   const [adminPassword, setAdminPassword] = useState("");
@@ -218,7 +220,7 @@ export default function ModelsAllowlistPage() {
                   spellCheck={false}
                   data-lpignore="true"
                   data-1p-ignore="true"
-                  style={{ WebkitTextSecurity: "disc" }}
+                  style={MASKED_TEXT_INPUT_STYLE}
                   className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
                 />
               </div>
@@ -480,7 +482,7 @@ export default function ModelsAllowlistPage() {
                     spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
-                    style={{ WebkitTextSecurity: "disc" }}
+                    style={MASKED_TEXT_INPUT_STYLE}
                     className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
                   />
                 </div>

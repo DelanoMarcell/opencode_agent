@@ -526,6 +526,9 @@ export function compareAscending(left: string, right: string): number {
 }
 
 const ATTACHED_FILES_BLOCK_PATTERN = /<attached_files>\s*([\s\S]*?)\s*<\/attached_files>/i;
+const ATTACHED_FILES_BLOCK_STRIP_PATTERN = /<attached_files>\s*[\s\S]*?\s*<\/attached_files>/gi;
+const UPLOADED_FILE_LIBRARY_BLOCK_STRIP_PATTERN =
+  /<uploaded_file_library>\s*[\s\S]*?\s*<\/uploaded_file_library>/gi;
 
 export function getAttachedFileLabel(path: string): string {
   const normalized = path.trim().replace(/\\/g, "/");
@@ -538,6 +541,11 @@ export function parseAttachedFilesFromText(text: string): {
   attachedFiles: Array<AttachedFileReference>;
 } {
   const normalizedText = text.trim();
+  const visibleText = normalizedText
+    .replace(ATTACHED_FILES_BLOCK_STRIP_PATTERN, "")
+    .replace(UPLOADED_FILE_LIBRARY_BLOCK_STRIP_PATTERN, "")
+    .trim();
+
   if (!normalizedText) {
     return {
       visibleText: "",
@@ -548,7 +556,7 @@ export function parseAttachedFilesFromText(text: string): {
   const match = normalizedText.match(ATTACHED_FILES_BLOCK_PATTERN);
   if (!match) {
     return {
-      visibleText: normalizedText,
+      visibleText,
       attachedFiles: [],
     };
   }
@@ -566,7 +574,6 @@ export function parseAttachedFilesFromText(text: string): {
       label: getAttachedFileLabel(path),
     }));
 
-  const visibleText = normalizedText.replace(ATTACHED_FILES_BLOCK_PATTERN, "").trim();
   return {
     visibleText,
     attachedFiles,

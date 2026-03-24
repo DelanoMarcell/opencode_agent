@@ -103,6 +103,10 @@ import type {
   StoredFileSummary,
   StoredFileUploadResult,
 } from "@/lib/files/types";
+import {
+  buildMatterLibraryRelativePath,
+  buildSessionLibraryRelativePath,
+} from "@/lib/files/storage-paths";
 import type { Ms365AttachmentSelection } from "@/lib/ms365/types";
 
 const DEFAULT_BASE_URL =
@@ -222,16 +226,30 @@ function buildAttachedFilesBlock(attachedFiles: Array<PendingAttachedFile>) {
     .join("\n")}\n</attached_files>`;
 }
 
+function buildUploadedFileLibraryBlock(input: {
+  scope: FilesDialogScope;
+  directoryPath: string;
+  fileCount: number;
+}) {
+  return `<uploaded_file_library>\nThe user has not explicitly attached files for this request.\nFor uploaded-file work in this request, this is the only uploaded-file library you may use.\nUse this exact directory path when checking uploaded files for this request.\nLibrary scope: ${input.scope}\nDirectory: ${input.directoryPath}\nFile count: ${input.fileCount}\n${
+    input.fileCount > 0
+      ? "Uploaded files may exist in this directory."
+      : "There are currently no uploaded files in this directory."
+  }\nRefer to uploaded files by filename only in your response, not by full path.\n</uploaded_file_library>`;
+}
+
 function buildPromptFromComposerState(
   promptText: string,
-  attachedFiles: Array<PendingAttachedFile>
+  attachedFiles: Array<PendingAttachedFile>,
+  uploadedFileLibraryBlock?: string
 ) {
   const trimmedPrompt = promptText.trim();
   const attachedFilesBlock = buildAttachedFilesBlock(attachedFiles);
+  const hiddenContextBlock = attachedFilesBlock || uploadedFileLibraryBlock || "";
   const runtimePrompt =
-    trimmedPrompt && attachedFilesBlock
-      ? `${trimmedPrompt}\n\n${attachedFilesBlock}`
-      : trimmedPrompt || attachedFilesBlock;
+    trimmedPrompt && hiddenContextBlock
+      ? `${trimmedPrompt}\n\n${hiddenContextBlock}`
+      : trimmedPrompt;
 
   return {
     displayPrompt: trimmedPrompt,
@@ -2467,6 +2485,48 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [syncMatterFileSummary, syncSessionFileSummary]
   );
 
+  const resolveUploadedFileLibraryContext = useCallback(
+    (sessionResourceId?: string | null) => {
+      if (selectedMatterID) {
+        const matter = matters.find((candidate) => candidate.id === selectedMatterID);
+        if (!matter) {
+          return null;
+        }
+
+        return {
+          scope: "matter" as const,
+          directoryPath: buildMatterLibraryRelativePath(
+            bootstrap.user.organisationName,
+            matter.code
+          ),
+          fileCount: matterFileSummaryByMatterId[selectedMatterID]?.fileCount ?? 0,
+        };
+      }
+
+      const rawSessionId = sessionResourceId ?? selectedSessionID;
+      if (!rawSessionId) {
+        return null;
+      }
+
+      return {
+        scope: "session" as const,
+        directoryPath: buildSessionLibraryRelativePath(
+          bootstrap.user.organisationName,
+          rawSessionId
+        ),
+        fileCount: sessionFileSummaryByRawSessionId[rawSessionId]?.fileCount ?? 0,
+      };
+    },
+    [
+      bootstrap.user.organisationName,
+      matterFileSummaryByMatterId,
+      matters,
+      selectedMatterID,
+      selectedSessionID,
+      sessionFileSummaryByRawSessionId,
+    ]
+  );
+
   const currentModelKey = selectedModelKey ?? activeModelKey ?? null;
   const selectableModelLabelByKey = useMemo(
     () =>
@@ -3201,8 +3261,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   ]);
 
   const sendPrompt = useCallback(async () => {
-    const { displayPrompt, runtimePrompt } = buildPromptFromComposerState(inputText, attachedFiles);
-    if (!runtimePrompt || isBusy || isLoadingSelectedSession) return;
+    const displayPrompt = inputText.trim();
+    if (!displayPrompt || isBusy || isLoadingSelectedSession) return;
     const userMessageID = `msg_ffffffffffff${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
     const userCreatedAt = Date.now();
     const promptModel = currentModelKey ? splitModelKey(currentModelKey) : null;
@@ -3222,12 +3282,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     reasoningPartIDsRef.current.clear();
     activeAssistantServerMessageIDRef.current = null;
 
-    appendTrace(
-      promptModel
-        ? `prompt sent (${runtimePrompt.length} chars) [model: ${currentModelKey}${promptVariant ? ` · ${promptVariant}` : ""}]`
-        : `prompt sent (${runtimePrompt.length} chars)`
-    );
-
     const runID = crypto.randomUUID();
     shouldAutoScrollRef.current = true;
     appendUserCard(userMessageID, displayPrompt, userCreatedAt, true, nextAttachedFileRefs);
@@ -3244,9 +3298,26 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setRunUiPhase("thinking");
 
     try {
+      const preexistingUploadedFileLibraryContext =
+        attachedFiles.length === 0 ? resolveUploadedFileLibraryContext() : null;
       const liveSessionID = await ensureSession();
       const client = sdkClientRef.current;
       if (!client) throw new Error("OpenCode client is not initialized");
+      const uploadedFileLibraryBlock =
+        preexistingUploadedFileLibraryContext
+          ? buildUploadedFileLibraryBlock(preexistingUploadedFileLibraryContext)
+          : "";
+      const { runtimePrompt } = buildPromptFromComposerState(
+        displayPrompt,
+        attachedFiles,
+        uploadedFileLibraryBlock
+      );
+
+      appendTrace(
+        promptModel
+          ? `prompt sent (${runtimePrompt.length} chars) [model: ${currentModelKey}${promptVariant ? ` · ${promptVariant}` : ""}]`
+          : `prompt sent (${runtimePrompt.length} chars)`
+      );
 
       const fail = (error: Error) => {
         if (activeRunRef.current?.id === runID) {
@@ -3329,6 +3400,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     attachedFiles,
     appendUserCard,
     appendTrace,
+    bootstrap.user.organisationName,
     currentModelKey,
     currentModelVariant,
     ensureSession,
@@ -3336,6 +3408,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     isBusy,
     isLoadingSelectedSession,
     markAssistantCardsComplete,
+    resolveUploadedFileLibraryContext,
     scheduleInteractiveRefresh,
   ]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import Link from "next/link";
 
 import { Spinner } from "@/components/loaders/spinner";
@@ -20,6 +20,8 @@ type AllowlistResponse = {
   };
   error?: string;
 };
+
+const MASKED_TEXT_INPUT_STYLE = { WebkitTextSecurity: "disc" } as CSSProperties;
 
 export default function Ms365AllowlistPage() {
   const [url, setUrl] = useState("");
@@ -140,7 +142,7 @@ export default function Ms365AllowlistPage() {
                   spellCheck={false}
                   data-lpignore="true"
                   data-1p-ignore="true"
-                  style={{ WebkitTextSecurity: "disc" }}
+                  style={MASKED_TEXT_INPUT_STYLE}
                   className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
                 />
               </div>

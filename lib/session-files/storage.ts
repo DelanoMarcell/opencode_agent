@@ -1,16 +1,13 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  getMatterFolderName,
+  getOrganisationFolderName,
+  sanitizeStoragePathSegment,
+} from "@/lib/files/storage-paths";
 
 const WORKSPACE_STORAGE_ROOT_SEGMENTS = ["agent"] as const;
-
-function sanitizeSegment(value: string) {
-  const normalized = value.normalize("NFKC").trim();
-  const withoutSeparators = normalized.replace(/[\\/]/g, "-");
-  const collapsedWhitespace = withoutSeparators.replace(/\s+/g, " ");
-  const safe = collapsedWhitespace.replace(/[^a-zA-Z0-9._ -]/g, "_");
-  const trimmed = safe.replace(/^\.+/, "").slice(0, 180).trim();
-  return trimmed || "item";
-}
+const sanitizeSegment = sanitizeStoragePathSegment;
 
 function sanitizeFileName(name: string) {
   const trimmed = sanitizeSegment(name);
@@ -43,14 +40,6 @@ export function toWorkspaceRelativeStoragePath(storageRelativePath: string) {
 
 export function toModelRelativeStoragePath(storageRelativePath: string) {
   return storageRelativePath;
-}
-
-export function getOrganisationFolderName(organisationName: string) {
-  return sanitizeSegment(organisationName) || "organisation";
-}
-
-export function getMatterFolderName(matterCode: string) {
-  return sanitizeSegment(matterCode) || "matter";
 }
 
 export function getSessionFolderPath(organisationName: string, rawSessionId: string) {
