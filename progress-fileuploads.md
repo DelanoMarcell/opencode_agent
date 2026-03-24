@@ -1,0 +1,148 @@
+# Progress
+
+- [done] Define the first file-library slice as storage and management only, with no model prompting yet
+- [done] Decide that file metadata lives in Mongo and is managed independently of any assistant-prompting behavior
+- [done] Add the `SessionFile` Mongoose model, the `MatterFile` Mongoose model, and shared server-side storage helpers
+- [done] Add API route handlers for session files:
+  - `GET /api/opencode-sessions/[sessionId]/files`
+  - `POST /api/opencode-sessions/[sessionId]/files`
+  - `DELETE /api/opencode-sessions/[sessionId]/files/[fileId]`
+- [done] Add API route handlers for matter files:
+  - `GET /api/matters/[id]/files`
+  - `POST /api/matters/[id]/files`
+  - `DELETE /api/matters/[id]/files/[fileId]`
+- [done] Add session-file and matter-file summary data to the agent bootstrap payload
+- [done] Add a shared files dialog that works for the active session or the active matter
+- [done] Add an `Attach` dropdown action for `Upload from your device`
+- [done] Wire general chats to upload into the active session library
+- [done] Wire matter chats and matter-overview uploads into the active matter library
+- [done] Confirm the current local upload behavior end to end:
+  - general chat uploads go into the active session file library
+  - matter chat uploads go into the active matter file library
+  - matter-overview uploads also go into the active matter file library
+  - session and matter files are listed and deleted through the same shared dialog surface
+- [done] Keep disk names human-readable while avoiding clashes:
+  - preserve the original filename on first save
+  - resolve same-name collisions naturally as `file.pdf`, `file (1).pdf`, `file (2).pdf`
+  - store the chosen on-disk name in Mongo as `storedName`
+- [done] Prevent exact duplicate file content per scope:
+  - compute `checksumSha256` before any disk write
+  - skip writing and skip creating a new DB row when the same checksum already exists in the same session or matter library
+  - enforce checksum uniqueness per scope in Mongo
+- [done] Keep the current slice scoped to file-library management only:
+  - upload
+  - browse
+  - search
+  - single delete
+  - bulk delete
+  - no assistant-facing attach semantics yet
+- [done] Move Microsoft 365 out of the chat-attach runtime for now:
+  - remove MS365 selected-file pills above the composer
+  - remove MS365 prompt/runtime injection
+  - keep the MS365 browser as a separate browsing/upload surface only
+- [done] Move MS365 allowlisted locations out of env and into Mongo
+- [done] Scope MS365 allowed locations by organisation instead of keeping them global
+- [done] Verify the current MS365 storage/browsing position:
+  - SharePoint locations are now managed through `/ms365/allowlist`
+  - the attach dialog is currently a browser only
+  - MS365 files are not yet stored into the session or matter local file libraries
+- [done] Add Microsoft 365 import into the local file libraries:
+  - session imports go through `POST /api/opencode-sessions/[sessionId]/files/ms365`
+  - matter imports go through `POST /api/matters/[id]/files/ms365`
+  - the browser sends only `locationId`, `driveId`, and `itemId` to the backend
+  - the backend revalidates the item against the allowed location scope before downloading it
+  - the backend fetches the temporary Graph download URL server-side and saves the bytes into the existing local file libraries
+- [done] Extend stored file metadata to capture origin:
+  - `source: "device" | "ms365"`
+  - optional `ms365LocationId`
+  - optional `ms365DriveId`
+  - optional `ms365ItemId`
+  - optional `ms365WebUrl`
+- [done] Surface the new origin in the shared files dialog with a `Source` column for both session and matter files
+- [done] Verify the end-to-end storage/list/delete flow and update this file with final status
+- [done] Expose a model-ready relative path to the client for stored files:
+  - the serialized file payload now includes `relativePath`
+  - the value is now the model-facing path relative to the agent working directory, for example `LNP/session-files/...`
+  - the underlying Mongo `relativePath` field remains unchanged, so no backfill is required
+- [done] Implement the first real attach behavior on top of the current libraries:
+  - clicking `Attach` in `Files In This Session` or `Files In This Matter` now takes the currently selected stored files
+  - attached files are stored as transient client runtime state only
+  - repeated attach actions before send are cumulative and deduped by `fileId`
+  - the files dialog closes immediately after attaching
+- [done] Implement the agreed first send-time prompt behavior:
+  - attached files apply to the next send only
+  - attached files clear after a successful send
+  - attached files also clear when the chat route/context changes
+  - the prompt currently appends the raw attachment block below the user text
+  - the raw block is kept in stored runtime text for the model, while visible rendering is now stripped separately
+- [done] Add the first pre-send attachment UX in the composer:
+  - attached files now show above the text box before send
+  - the composer shows the first few attached filenames directly
+  - additional attachments collapse into an `… and N more` summary
+  - visible attachments can be removed individually
+  - all pending attachments can be removed with `Clear all`
+- [done] Use the agreed first hidden attachment format for this phase:
+  - user text first
+  - blank line
+  - `<attached_files>`
+  - one model-facing `LNP/...` or equivalent storage-relative path per line
+  - `</attached_files>`
+- [done] Strip the raw `<attached_files>` block from visible message rendering and replace it with per-message pills:
+  - stored user messages are parsed during hydration
+  - the visible user text is rendered without the raw attachment block
+  - attached files are carried as metadata on that specific user message
+  - attachment pills render inside that specific user message card after send and after reload
+
+- [next] Restore attachment awareness when stored messages come back from OpenCode:
+  - verify the hydration/reconciliation path behaves cleanly across longer conversations and compaction
+- [done] Add hidden default file-library scope guidance even when no explicit files are attached:
+  - when a chat has a session or matter file library but the user has not explicitly attached files for this message, the model is now told about that library in hidden runtime context
+  - the hidden prompt now makes clear that no explicit attachments were provided for this request
+  - the hidden prompt includes how many files are currently in that session or matter library so the model knows whether there are any uploaded files it can even try to use
+  - it tells the model that if the user asks about uploaded files, this library is the only directory it may use for uploaded-file work
+  - the hidden library-scope prompt is stripped from visible chat rendering the same way as `<attached_files>`
+- [next] Define the exact composer/runtime attach UX:
+  - whether the current first-few-plus-summary composer strip is sufficient
+  - whether hidden attachments beyond the preview need their own expandable review surface before send
+  - how the user can tell which files were attached on an already-sent message
+  - how attached files should open in a new tab when the file type supports it, especially PDFs and other browser-viewable files
+- [next] Reuse the same attach/runtime path for Microsoft 365 imports now that imports land in the same local libraries:
+  - imported MS365 files should behave exactly like device-uploaded files once they appear in the session or matter table
+  - no separate model attachment path should exist for Microsoft 365 after import
+- [next] Verify the full combined path after attach semantics are implemented:
+  - local device upload to session
+  - local device upload to matter
+  - MS365 import into session
+  - MS365 import into matter
+  - attach selected stored files from session library
+  - attach selected stored files from matter library
+  - render stored-message attachment pills after reload
+  - assistant-visible attach behavior on send
+
+## Notes
+
+- This slice now covers:
+  - file storage
+  - listing/search/delete
+  - Microsoft 365 import into the same local libraries
+  - first-pass transient attach state and raw prompt injection
+- The filesystem contract is:
+  - `agent/<organisationName>/session-files/<rawSessionId>/`
+  - `agent/<organisationName>/matter-files/<matterCode>/`
+- The current library split is now confirmed:
+  - general chats use the session library
+  - matter chats use the matter library
+  - matter-overview uploads use the matter library so files are shared across chats in that matter
+- Session and matter libraries are now the canonical local storage layer for uploaded device files
+- Microsoft 365 is now part of that canonical library layer:
+  - locations are stored in Mongo
+  - browsing works
+  - selected Microsoft 365 files can now be imported into the same local file libraries as device uploads
+- Assistant-facing attach behavior is still intentionally deferred:
+  - the agreed first version is transient per-message attach state only, and that first attach slice is now implemented
+  - attached files are currently passed to the model via a raw `<attached_files>` runtime block appended below the user text
+  - hidden attached-file and uploaded-library context is now stripped from visible message text on hydration
+  - attached-file pills are now rendered from parsed stored-message paths
+  - no persisted "selected for assistant use" state should be introduced
+  - no file search or extraction pipeline is planned for this first attach pass
+- Verification completed with `git diff --check`; bounded `tsc --noEmit` and targeted `eslint` runs timed out in this repo without returning diagnostics

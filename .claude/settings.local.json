@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /mnt/c/Users/Delan/desktop/lnp_agent/lib/ms365 -type f -name *.ts -o -name *.tsx)",
+      "Bash(find /mnt/c/Users/Delan/desktop/lnp_agent/app/api/ms365 -type f -name *.ts -o -name *.tsx)",
+      "Bash(find /mnt/c/Users/Delan/desktop/lnp_agent -name tailwind.config.* -o -name next.config.*)",
+      "Bash(grep -E \"\\\\.tsx$\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

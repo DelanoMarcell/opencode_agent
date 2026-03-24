@@ -1,4 +1,0 @@
-one card that gets replaced with model text/tool calls, so then we just get all stuff showing one card and final response
-
-Create custom tools and explore what plugins do. 
-Custom tools would be something like, remember tool. Saves it to a markdown file to remember an instruction

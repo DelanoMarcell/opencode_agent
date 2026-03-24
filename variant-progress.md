@@ -1,0 +1,95 @@
+# Progress
+
+- [done] Confirm the current problem in the app:
+  - the app was not loading available model variants from OpenCode provider metadata
+  - the app was not sending `variant` on `session.promptAsync(...)`
+  - the app was not showing the current variant anywhere in the UI
+  - selecting a reasoning variant in the OpenCode CLI did not reliably affect prompts sent from this app
+- [done] Confirm the OpenCode behavior and source of truth:
+  - `provider.list()` exposes `model.variants`
+  - `session.promptAsync(...)` accepts both `model` and `variant`
+  - OpenCode stores the used `variant` on user messages
+  - the latest stored user message can therefore be used to recover the last used model and variant for a chat
+- [done] Add a shared model-catalog builder for the app:
+  - one helper now normalizes context limits, costs, and available variants from OpenCode provider metadata
+  - the same logic is used by bootstrap and client-side refresh so the app does not drift between server and client model metadata
+- [done] Extend the app bootstrap model catalog to include available variants per model key
+- [done] Load variant availability into client runtime state:
+  - the runtime now keeps `availableModelVariantsByKey`
+  - provider metadata refresh now updates variants as well as context limits and costs
+- [done] Restore the last used model and variant from stored session history:
+  - the runtime now reads the latest stored user message
+  - it falls back to the latest assistant model when there is no usable stored user model selection yet
+  - the selected variant is restored only when a real stored variant exists
+- [done] Make model and variant first-class send-time state in the app:
+  - the runtime now computes the current effective model key for the session
+  - the runtime now computes the current selected variant for that model
+  - prompts now send both `model` and `variant` explicitly when available
+- [done] Surface current variant state in the composer UI:
+  - the composer now shows the current model and current variant
+  - the composer now exposes a variant dropdown for the current model when variants are available
+  - the dropdown includes a `Default` option plus the available model-specific variants returned by OpenCode
+- [done] Add model selection for brand-new chat routes:
+  - the app now derives selectable pre-send models from `provider.list()`
+  - model selection is currently limited to `openrouter` models
+  - brand-new routes like `/agent` and `/agent/matters/<matterId>` now preselect an OpenRouter model before the first send
+  - the selected model can now be changed before the first send
+- [done] Add a new-route default model resolution path:
+  - if the current chat already has stored messages, the latest user message still wins
+  - otherwise the app now falls back to the backend default model when one exists
+  - if there is no backend default model, the app falls back to the OpenRouter default model from `provider.list()`
+- [done] Keep variants available before the first send on new routes:
+  - once a pre-send model is known, its variants are available immediately
+  - if no variant is chosen, the app uses the default variant behavior
+- [done] Make variant changes sticky within the current chat:
+  - selecting a variant updates runtime state immediately
+  - subsequent sends in that chat continue with the chosen variant until changed again
+  - resetting or changing chat context clears or rehydrates that state from the new session
+- [done] Add a backend model allowlist and default policy for new chats:
+  - there is now a Mongo-backed organisation model policy
+  - `/models/allowlist` is protected by an admin password like the MS365 allowlist flow
+  - admins can choose which OpenRouter models are available in the client picker
+  - admins can choose an enforced backend default model for brand-new chats
+  - admins can choose an enforced backend default variant for that default model
+- [done] Apply the backend model policy during SSR bootstrap:
+  - brand-new routes now receive the backend-filtered model list from server bootstrap
+  - brand-new routes now use the backend default model when one exists
+  - brand-new routes now use the backend default variant when one exists
+  - if no backend model policy exists, the app still falls back to the OpenCode provider default model
+- [done] Preserve existing-chat continuation behavior while constraining new selections:
+  - existing chats still continue from the latest stored user message model/variant
+  - if an existing chat is already on a model that is no longer allowlisted, it is still allowed to continue
+  - the model dropdown only shows backend-allowed models for new manual selections when a policy exists
+- [done] Keep backend policy active during client-side provider metadata refresh:
+  - provider refresh no longer expands the model selector back to the full OpenRouter list when a backend policy is active
+  - backend default selection remains the new-chat source of truth on reset/new-chat flows
+
+- [next] Verify end-to-end behavior across the main chat flows:
+  - existing session with prior stored model/variant
+  - existing session with prior model but no explicit variant
+  - new session with no prior stored messages
+  - route reload / hard refresh
+  - resumed busy session
+- [next] Decide whether the session header should also show the active variant:
+  - the composer now exposes it, which is enough for functionality
+  - but the header may still be the better long-term place for always-visible session model state
+- [next] Decide whether the timeline should show the actual model variant used per sent turn:
+  - current scope restores and reuses the last used variant for the chat
+  - later we may want per-message visibility for auditability
+- [next] Decide whether model selection should remain OpenRouter-only or expand to other connected providers
+- [next] Decide whether the composer should show friendly model labels everywhere or continue falling back to raw model keys for non-selectable models
+- [next] Decide whether model selection should remain available mid-chat or only on brand-new / pre-send routes
+- [next] Decide whether backend model policy should eventually enforce send-time validation server-side as well:
+  - right now the policy is enforced through SSR/bootstrap and the client picker
+  - that is enough for normal app usage
+  - but it is not a hard server-side gate on direct client tampering because prompts still go from client to OpenCode
+
+## Notes
+
+- The intended source of truth for continuing a chat is the latest stored user message in that session:
+  - it captures the model and variant the app actually sent
+  - it is more reliable than assuming the OpenCode CLI or another client last touched the same session in the same way
+- The app now explicitly sends `model` and `variant` on prompt when it has them, so chat behavior no longer depends on implicit CLI-side variant state.
+- The intended split is now:
+  - existing chat = latest stored user message drives continuation
+  - brand-new chat = backend policy drives selection when present, otherwise provider metadata does
