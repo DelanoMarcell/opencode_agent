@@ -169,8 +169,7 @@ body {
     align-items: stretch;
   }
 
-  .agent-panel,
-  .agent-trace-panel {
+  .agent-panel {
     border-color: var(--border) !important;
     background: var(--paper);
     box-shadow: 8px 8px 0 rgba(var(--shadow-ink), 0.16);
@@ -449,7 +448,7 @@ body {
 
   /* ---- Agent: Scroll Areas ------------------------------------ */
 
-  /* Shared scrollbar style — applied to .agent-panel, .agent-trace-panel,
+  /* Shared scrollbar style — applied to .agent-panel,
      .agent-context-popover, and .agent-dialog (modal scroll bodies). */
   .agent-dialog [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
     width: 0.5rem !important;
@@ -478,19 +477,11 @@ body {
   }
 
   .agent-panel [data-slot="scroll-area"],
-  .agent-panel [data-slot="scroll-area-viewport"],
-  .agent-trace-panel [data-slot="scroll-area"],
-  .agent-trace-panel [data-slot="scroll-area-viewport"] {
+  .agent-panel [data-slot="scroll-area-viewport"] {
     min-width: 0;
   }
 
-  .agent-trace-panel [data-slot="card-header"] {
-    background: var(--paper-2);
-    border-color: var(--border) !important;
-  }
-
   .agent-panel [data-slot="scroll-area-scrollbar"][data-orientation="vertical"],
-  .agent-trace-panel [data-slot="scroll-area-scrollbar"][data-orientation="vertical"],
   .agent-context-popover [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
     width: 0.5rem !important;
     padding: 1px !important;
@@ -500,7 +491,6 @@ body {
   }
 
   .agent-panel [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"],
-  .agent-trace-panel [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"],
   .agent-context-popover [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
     height: 0.5rem !important;
     padding: 1px !important;
@@ -510,7 +500,6 @@ body {
   }
 
   .agent-panel [data-slot="scroll-area-thumb"],
-  .agent-trace-panel [data-slot="scroll-area-thumb"],
   .agent-context-popover [data-slot="scroll-area-thumb"] {
     background: var(--scrollbar) !important;
     border: 1px solid var(--border);
@@ -518,9 +507,6 @@ body {
   }
 
   .agent-panel [data-slot="scroll-area-scrollbar"]:hover [data-slot="scroll-area-thumb"],
-  .agent-trace-panel
-    [data-slot="scroll-area-scrollbar"]:hover
-    [data-slot="scroll-area-thumb"],
   .agent-context-popover
     [data-slot="scroll-area-scrollbar"]:hover
     [data-slot="scroll-area-thumb"] {
@@ -642,8 +628,7 @@ body {
   /* ---- Responsive --------------------------------------------- */
 
   @media (max-width: 768px) {
-    .agent-panel,
-    .agent-trace-panel {
+    .agent-panel {
       box-shadow: none;
     }
 

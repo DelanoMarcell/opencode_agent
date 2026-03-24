@@ -3,16 +3,15 @@
 This note is a quick file map for the main agent UI and runtime.
 ## Main Entry
 
-- [app/agent/page.tsx](../app/agent/page.tsx) is the top-level agent page. It composes the sidebar, main conversation panel, composer, and trace panel, and still owns the core session/stream orchestration.
+- [app/agent/page.tsx](../app/agent/page.tsx) is the top-level agent page. It composes the sidebar, main conversation panel, and composer, and still owns the core session/stream orchestration.
 
 ## Agent Shell Components
 
 - [components/agent-shell/matter-chat-sidebar.tsx](../components/agent-shell/matter-chat-sidebar.tsx) renders the left sidebar that groups sessions under matter-style folders.
-- [components/agent-shell/agent-session-header.tsx](../components/agent-shell/agent-session-header.tsx) renders the active-session header, status badge, resume action, and overflow menu.
+- [components/agent-shell/agent-session-header.tsx](../components/agent-shell/agent-session-header.tsx) renders the active-session header and status badge.
 - [components/agent-shell/agent-timeline.tsx](../components/agent-shell/agent-timeline.tsx) renders the main conversation timeline, including user messages, assistant messages, tool cards, and the transient thinking card.
 - [components/agent-shell/agent-interactive-panel.tsx](../components/agent-shell/agent-interactive-panel.tsx) renders pending interactive work from the runtime, mainly question flows and permission prompts.
 - [components/agent-shell/agent-composer.tsx](../components/agent-shell/agent-composer.tsx) renders the message composer, send button, context usage display, and cost/session usage popover.
-- [components/agent-shell/agent-trace-panel.tsx](../components/agent-shell/agent-trace-panel.tsx) renders the right-hand trace/debug panel, including base URL controls and live trace output.
 
 ## Hooks
 
@@ -70,7 +69,6 @@ This note is a quick file map for the main agent UI and runtime.
 
 - `extractCommandFromInput`: finds a shell/command string inside tool input data.
 - `getToolSignature`: creates a compact signature used to detect tool state changes.
-- `formatToolUpdate`: formats tool events for the live trace panel.
 - `getAssistantError`: extracts readable error text from assistant/runtime error objects.
 - `normalizeToolArgs`: normalizes tool arguments into a plain object.
 - `parseToolOutput`: parses JSON tool output when possible and falls back to raw text.

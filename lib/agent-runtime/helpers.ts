@@ -416,29 +416,6 @@ export function getToolSignature(part: ToolPart): string {
   return `error:${part.state.error}:${commandKey}`;
 }
 
-export function formatToolUpdate(part: ToolPart): string {
-  const command = extractCommandFromInput(part.state.input);
-  const commandText = command ? ` | cmd: ${summarizeText(command, 160)}` : "";
-  const base = `${part.tool}#${part.callID}`;
-
-  if (part.state.status === "pending") {
-    return `tool pending: ${base}${commandText}`;
-  }
-
-  if (part.state.status === "running") {
-    const title = part.state.title ? ` | ${part.state.title}` : "";
-    return `tool running: ${base}${title}${commandText}`;
-  }
-
-  if (part.state.status === "completed") {
-    const title = part.state.title ? ` | ${part.state.title}` : "";
-    const output = part.state.output ? ` | output: ${summarizeText(part.state.output, 120)}` : "";
-    return `tool completed: ${base}${title}${commandText}${output}`;
-  }
-
-  return `tool error: ${base}${commandText} | ${summarizeText(part.state.error, 160)}`;
-}
-
 export function getAssistantError(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
   const details = error as Record<string, unknown>;

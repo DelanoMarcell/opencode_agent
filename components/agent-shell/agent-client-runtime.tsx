@@ -25,7 +25,6 @@ import { MatterOverviewEmptyState } from "@/components/agent-shell/matter-overvi
 import { MattersWorkspaceEmptyState } from "@/components/agent-shell/matters-workspace-empty-state";
 import { AgentSessionHeader } from "@/components/agent-shell/agent-session-header";
 import { AgentTimeline } from "@/components/agent-shell/agent-timeline";
-import { AgentTracePanel } from "@/components/agent-shell/agent-trace-panel";
 import {
   MatterChatSidebar,
   type MatterChatSidebarMatter,
@@ -64,13 +63,11 @@ import {
   sortMessagePartEntries,
   sortStoredParts,
   toErrorMessage,
-  toCompactJSON,
   toRuntimeToolCall,
   updateUserMessageText,
   upsertMessageEntry,
   upsertMessagePart,
   waitFor,
-  formatToolUpdate,
   formatTokenCount,
   formatUsdAmount,
   getTokenUsageTotal,
@@ -523,7 +520,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     });
   const pathname = usePathname();
   const router = useRouter();
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [sessionID, setSessionID] = useState<string | null>(
     bootstrapSessionState.isHydrated ? bootstrap.initialRawSessionId ?? null : null
   );
@@ -581,7 +577,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [filesDialogRefreshToken, setFilesDialogRefreshToken] = useState(0);
-  const [traceLines, setTraceLines] = useState<Array<string>>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<Array<QuestionRequest>>([]);
   const [pendingPermissions, setPendingPermissions] = useState<
@@ -607,7 +602,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       ? deriveRunUiPhaseFromMessageParts(bootstrapSessionState.partsByMessageID)
       : "thinking"
   );
-  const [showTrace, setShowTrace] = useState(false);
   const workspaceMode = bootstrap.workspaceMode;
   const {
     activeContextLimit,
@@ -632,7 +626,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     storedMessages: bootstrapSessionState.storedMessages,
   });
 
-  const configuredBaseURLRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionIDRef = useRef<string | null>(
     bootstrapSessionState.isHydrated ? bootstrap.initialRawSessionId ?? null : null
@@ -859,12 +852,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     viewport.addEventListener("scroll", updateAutoScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", updateAutoScroll);
   }, [getTimelineViewport, sessionID]);
-
-  const appendTrace = useCallback((line: string) => {
-    const time = new Date().toLocaleTimeString();
-    const formatted = `[${time}] ${line}`;
-    setTraceLines((previous) => [...previous.slice(-299), formatted]);
-  }, []);
 
   const appendUserCard = useCallback(
     (
@@ -1099,29 +1086,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, [mutateMessageState]);
 
   const ensureClients = useCallback(() => {
-    const isRealBaseUrlChange =
-      configuredBaseURLRef.current !== null && configuredBaseURLRef.current !== baseUrl;
-
-    if (
-      sessionIDRef.current &&
-      isRealBaseUrlChange
-    ) {
-      throw new Error(
-        "Cannot change base URL while a session is active. Start a new session first."
-      );
-    }
-
-    if (configuredBaseURLRef.current === baseUrl && sdkClientRef.current) {
+    if (sdkClientRef.current) {
       return;
     }
 
-    if (isRealBaseUrlChange) {
-      resetModelCatalog();
-    }
-
-    sdkClientRef.current = createOpencodeClient({ baseUrl });
-    configuredBaseURLRef.current = baseUrl;
-  }, [baseUrl, resetModelCatalog]);
+    resetModelCatalog();
+    sdkClientRef.current = createOpencodeClient({ baseUrl: DEFAULT_BASE_URL });
+  }, [resetModelCatalog]);
 
   const applyModelCatalogSnapshot = useCallback(
     (catalog: AgentBootstrap["modelCatalog"]) => {
@@ -1146,8 +1117,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       const result = await client.provider.list();
       if (result.error) {
-        const message = getAssistantError(result.error);
-        if (message) appendTrace(`provider metadata error: ${message}`);
         return;
       }
 
@@ -1165,10 +1134,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setAvailableModelVariantsByKey(nextCatalog.variants);
       setAvailableSelectableModels(nextCatalog.selectableModels);
       setDefaultSelectableModelKey(nextCatalog.defaultModelKey);
-    } catch (error) {
-      appendTrace(`provider metadata error: ${toErrorMessage(error)}`);
-    }
-  }, [appendTrace, ensureClients, modelSelectionPolicy, replaceModelCatalog]);
+    } catch {}
+  }, [ensureClients, modelSelectionPolicy, replaceModelCatalog]);
 
   const syncModelSelectionFromStoredMessages = useCallback(
     (storedMessages: Array<StoredMessage>) => {
@@ -1244,8 +1211,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
       setPendingQuestions(sessionQuestions);
       setPendingPermissions(sessionPermissions);
-    } catch (error) {
-      appendTrace(`interactive control error: ${toErrorMessage(error)}`);
+    } catch {
     } finally {
       interactiveRefreshInFlightRef.current = false;
       if (interactiveRefreshDirtyRef.current) {
@@ -1253,7 +1219,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         void refreshPendingInteractiveRequests();
       }
     }
-  }, [appendTrace]);
+  }, []);
 
   const scheduleInteractiveRefresh = useCallback(
     (delayMs = INTERACTIVE_REFRESH_DEBOUNCE_MS) => {
@@ -1462,7 +1428,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const resyncActiveSession = useCallback(
-    async (reason: string) => {
+    async () => {
       const currentSessionID = sessionIDRef.current;
       const client = sdkClientRef.current;
       if (!client || !currentSessionID) return;
@@ -1504,17 +1470,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         }
 
         scheduleInteractiveRefresh(0);
-
-        appendTrace(`session resynced (${reason})`);
-      } catch (error) {
-        appendTrace(`session resync error (${reason}): ${toErrorMessage(error)}`);
-      }
+      } catch {}
     },
-    [
-      applySessionSnapshot,
-      appendTrace,
-      scheduleInteractiveRefresh,
-    ]
+    [applySessionSnapshot, markAssistantCardsComplete, scheduleInteractiveRefresh]
   );
 
   const finalizeActiveRun = useCallback(
@@ -1620,23 +1578,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         }
 
         markAssistantCardsComplete();
-        appendTrace(
-          currentRun.model
-            ? `turn finished [model: ${currentRun.model}]${
-                trigger === "session.idle" ? "" : ` (${trigger})`
-              }`
-            : `turn finished${trigger === "session.idle" ? "" : ` (${trigger})`}`
-        );
         currentRun.finish();
         scheduleInteractiveRefresh(0);
-      } catch (error) {
+      } catch {
         const currentRun = activeRunRef.current;
         if (
           currentRun &&
           currentRun.id === targetRunID &&
           currentRun.sessionID === targetSessionID
         ) {
-          appendTrace(`turn finalization error: ${toErrorMessage(error)}`);
           if (requiresCanonicalRefresh) {
             currentRun.pollRecoveryEligible = true;
             return;
@@ -1652,7 +1602,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     },
     [
       applySessionSnapshot,
-      appendTrace,
       getLatestAssistantText,
       markAssistantCardsComplete,
       scheduleInteractiveRefresh,
@@ -1696,12 +1645,11 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       if (status.type === "idle") {
         void finalizeActiveRun(targetRunID, targetSessionID, "status-poll");
       }
-    } catch (error) {
-      appendTrace(`session status poll error: ${toErrorMessage(error)}`);
+    } catch {
     } finally {
       statusPollInFlightRef.current = false;
     }
-  }, [appendTrace, finalizeActiveRun]);
+  }, [finalizeActiveRun]);
 
   const processEvent = useCallback(
     (event: AgentEvent) => {
@@ -1754,10 +1702,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           const model = "modelID" in info ? String(info.modelID) : "unknown";
           activeRun.model = `${provider}/${model}`;
 
-          const assistantError = getAssistantError(
-            "error" in info ? info.error : undefined
-          );
-          if (assistantError) appendTrace(`assistant error: ${assistantError}`);
+          getAssistantError("error" in info ? info.error : undefined);
         }
         return;
       }
@@ -1859,7 +1804,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           const signature = getToolSignature(part);
           if (toolStateSeenRef.current.get(part.id) !== signature) {
             toolStateSeenRef.current.set(part.id, signature);
-            appendTrace(formatToolUpdate(part));
           }
 
           const previous =
@@ -1884,31 +1828,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           return;
         }
 
-        if (part.type === "step-start") {
-          appendTrace("step started");
-          return;
-        }
+        if (part.type === "step-start") return;
 
-        if (part.type === "step-finish") {
-          appendTrace(`step finished: ${part.reason}`);
-          return;
-        }
+        if (part.type === "step-finish") return;
 
-        if (part.type === "subtask") {
-          appendTrace(`subtask: ${part.description}`);
-          return;
-        }
+        if (part.type === "subtask") return;
 
-        if (part.type === "agent") {
-          appendTrace(`agent selected: ${part.name}`);
-          return;
-        }
+        if (part.type === "agent") return;
 
-        if (part.type === "patch") {
-          appendTrace(
-            `patch generated: ${part.files.length} file(s) | ${part.files.join(", ")}`
-          );
-        }
+        if (part.type === "patch") return;
 
         return;
       }
@@ -1941,43 +1869,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         return;
       }
 
-      if (event.type === "command.executed") {
-        const args = event.properties.arguments?.trim();
-        const command = args
-          ? `/${event.properties.name} ${args}`
-          : `/${event.properties.name}`;
-        appendTrace(`command executed: ${command}`);
-        return;
-      }
-
-      if (event.type === "pty.created") {
-        const info = event.properties.info;
-        const command = [info.command, ...info.args].join(" ").trim();
-        appendTrace(
-          `terminal started (${info.id}) status=${info.status} cmd=${
-            command || "(none)"
-          }`
-        );
-        return;
-      }
-
-      if (event.type === "pty.updated") {
-        appendTrace(
-          `terminal status (${event.properties.info.id}): ${event.properties.info.status}`
-        );
-        return;
-      }
-
-      if (event.type === "pty.exited") {
-        appendTrace(
-          `terminal exited (${event.properties.id}) code=${event.properties.exitCode}`
-        );
-        return;
-      }
+      if (event.type === "command.executed") return;
+      if (event.type === "pty.created") return;
+      if (event.type === "pty.updated") return;
+      if (event.type === "pty.exited") return;
 
       if (event.type === "session.error") {
         const message = getAssistantError(event.properties.error) ?? "Unknown error";
-        appendTrace(`session error: ${message}`);
 
         if (
           activeRun &&
@@ -1988,71 +1886,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         return;
       }
 
-      if (event.type === "session.diff") {
-        const summary = event.properties.diff
-          .map(
-            (file: { file: string; additions: number; deletions: number }) =>
-              `${file.file}(+${file.additions}/-${file.deletions})`
-          )
-          .join(", ");
-        appendTrace(`session diff: ${summary || "no changes"}`);
-        return;
-      }
-
-      if (event.type === "file.edited") {
-        appendTrace(`file edited: ${event.properties.file}`);
-        return;
-      }
-
-      if (event.type === "todo.updated") {
-        const counts = event.properties.todos.reduce(
-          (
-            accumulator: { total: number; completed: number; inProgress: number },
-            todo: { status: string }
-          ) => {
-            accumulator.total += 1;
-            if (todo.status === "completed") accumulator.completed += 1;
-            if (todo.status === "in_progress") accumulator.inProgress += 1;
-            return accumulator;
-          },
-          { total: 0, completed: 0, inProgress: 0 }
-        );
-
-        appendTrace(
-          `todo updated: total=${counts.total} in_progress=${counts.inProgress} completed=${counts.completed}`
-        );
-        return;
-      }
+      if (event.type === "session.diff") return;
+      if (event.type === "file.edited") return;
+      if (event.type === "todo.updated") return;
 
       if (eventType === "permission.updated" || eventType === "permission.asked") {
-        const details = event.properties as Record<string, unknown>;
-        const id = typeof details.id === "string" ? details.id : "unknown";
-        const pattern =
-          details.pattern === undefined
-            ? ""
-            : ` pattern=${toCompactJSON(details.pattern, 120)}`;
-        appendTrace(`permission requested (${id})${pattern}`);
         scheduleInteractiveRefresh();
         return;
       }
 
       if (event.type === "permission.replied") {
-        const details = event.properties as Record<string, unknown>;
-        const requestID =
-          typeof details.permissionID === "string"
-            ? details.permissionID
-            : typeof details.requestID === "string"
-              ? details.requestID
-              : "unknown";
-        const response =
-          typeof details.response === "string"
-            ? details.response
-            : typeof details.reply === "string"
-              ? details.reply
-              : "unknown";
-        appendTrace(
-          `permission replied (${requestID}): ${response}`
-        );
         scheduleInteractiveRefresh();
         return;
       }
@@ -2065,14 +1908,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ) {
             activeRun.startObserved = true;
           }
-        }
-
-        if (event.properties.status.type === "retry") {
-          appendTrace(
-            `session status: retry attempt=${event.properties.status.attempt} next=${event.properties.status.next}`
-          );
-        } else {
-          appendTrace(`session status: ${event.properties.status.type}`);
         }
 
         if (
@@ -2098,7 +1933,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     },
     [
       applyAssistantTextDelta,
-      appendTrace,
       finalizeActiveRun,
       getAssistantTextForMessage,
       maybeReconcileOptimisticUserFromTextPart,
@@ -2140,11 +1974,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           });
           const stream = subscription.stream as AsyncIterable<StreamEvent>;
           connectedThisAttempt = true;
-          appendTrace(hasConnectedOnce ? "event stream reconnected" : "event stream connected");
           streamLastEventAtRef.current = Date.now();
 
           if (hasConnectedOnce) {
-            void resyncActiveSession("reconnect");
+            void resyncActiveSession();
           }
 
           heartbeatTimer = window.setInterval(() => {
@@ -2155,9 +1988,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             if (activeRunRef.current) {
               activeRunRef.current.pollRecoveryEligible = true;
             }
-            appendTrace(
-              `event stream stale (${Math.floor(staleMs / 1000)}s without events), reconnecting`
-            );
             controller.abort();
           }, HEARTBEAT_CHECK_INTERVAL_MS);
 
@@ -2175,14 +2005,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             if (isBusyRef.current && activeRunRef.current) {
               activeRunRef.current.pollRecoveryEligible = true;
             }
-            appendTrace("event stream closed");
           }
-        } catch (error) {
+        } catch {
           if (!controller.signal.aborted && !supervisor.signal.aborted) {
             if (isBusyRef.current && activeRunRef.current) {
               activeRunRef.current.pollRecoveryEligible = true;
             }
-            appendTrace(`event stream error: ${toErrorMessage(error)}`);
           }
         } finally {
           if (heartbeatTimer !== null) {
@@ -2206,7 +2034,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           reconnectDelayIndex + 1,
           RECONNECT_DELAYS_MS.length - 1
         );
-        appendTrace(`event stream reconnecting in ${delayMs}ms`);
         await waitFor(delayMs, supervisor.signal);
       }
     })().finally(() => {
@@ -2219,7 +2046,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     });
 
     eventStreamTaskRef.current = task;
-  }, [appendTrace, processEvent, resyncActiveSession]);
+  }, [processEvent, resyncActiveSession]);
 
   const hydrateSessionFromBootstrap = useCallback(
     async (
@@ -2317,7 +2144,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         setRunUiPhase("thinking");
       }
 
-      appendTrace(`session hydrated from server: ${targetSessionID} [status: ${snapshot.status}]`);
       scheduleInteractiveRefresh(0);
 
       try {
@@ -2326,21 +2152,20 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         if (!bootstrap.modelCatalog.loaded) {
           await refreshModelContextLimits();
         }
-      } catch (error) {
+      } catch {
         if (!isCurrentResumeRequest()) {
           return;
         }
-        appendTrace(`server snapshot live-connect error: ${toErrorMessage(error)}`);
       }
     },
     [
-      appendTrace,
       bootstrap.modelCatalog.loaded,
       ensureClients,
       ensureEventStream,
       markAssistantCardsComplete,
       rebuildEventCachesFromMessageState,
       rebuildSessionUsageFromStoredMessages,
+      replaceReasoningPartIDCache,
       refreshModelContextLimits,
       replaceMessageState,
       resetSessionTokenTracking,
@@ -2547,9 +2372,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const handleSelectModel = useCallback(
     (modelKey: string) => {
       setSelectedModelKey(modelKey);
-      appendTrace(`model selected: ${modelKey}`);
     },
-    [appendTrace]
+    []
   );
 
   const handleSelectModelVariant = useCallback(
@@ -2566,13 +2390,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         }
         return next;
       });
-      appendTrace(
-        variant
-          ? `model variant selected: ${currentModelKey} · ${variant}`
-          : `model variant reset: ${currentModelKey} · default`
-      );
     },
-    [appendTrace, currentModelKey]
+    [currentModelKey]
   );
 
   const handleOpenFiles = useCallback(() => {
@@ -2593,9 +2412,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         }
         return Array.from(next.values());
       });
-      appendTrace(`files attached for next send: ${files.length}`);
     },
-    [appendTrace]
+    []
   );
 
   const handleRemoveAttachedFile = useCallback((fileId: string) => {
@@ -2662,7 +2480,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         if (shouldOpenDialog) {
           setIsFilesDialogOpen(true);
         }
-        appendTrace(`${scope} files uploaded: ${files.length}`);
         return {
           files: payload.files,
           summary: payload.summary,
@@ -2671,13 +2488,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorText(message);
-        appendTrace(`${scope} file upload error: ${message}`);
         return null;
       } finally {
         setIsUploadingFiles(false);
       }
     },
-    [appendTrace, handleFilesSummaryChange, selectedMatterID, selectedSessionID]
+    [handleFilesSummaryChange, selectedMatterID, selectedSessionID]
   );
 
   const handleMs365FilesUpload = useCallback(
@@ -2725,7 +2541,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         }
 
         handleFilesSummaryChange(scope, resourceId, payload.summary);
-        appendTrace(`${scope} Microsoft 365 files uploaded: ${files.length}`);
         return {
           files: payload.files,
           summary: payload.summary,
@@ -2734,13 +2549,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorText(message);
-        appendTrace(`${scope} Microsoft 365 file upload error: ${message}`);
         return null;
       } finally {
         setIsUploadingFiles(false);
       }
     },
-    [appendTrace, handleFilesSummaryChange, selectedMatterID, selectedSessionID]
+    [handleFilesSummaryChange, selectedMatterID, selectedSessionID]
   );
 
   const assignSessionRecordToMatter = useCallback(
@@ -2963,7 +2777,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         setRunUiPhase("thinking");
       }
 
-      appendTrace(`session resumed: ${liveSelectedSessionID} [status: ${sessionStatus.type}]`);
       scheduleInteractiveRefresh(0);
     } catch (error) {
       if (isAbortError(error)) {
@@ -2974,7 +2787,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       }
       const message = toErrorMessage(error);
       setErrorText(message);
-      appendTrace(`resume error: ${message}`);
     } finally {
       if (resumeAbortRef.current === controller) {
         resumeAbortRef.current = null;
@@ -2984,12 +2796,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       }
     }
   }, [
-    appendTrace,
     rebuildEventCachesFromMessageState,
     rebuildSessionUsageFromStoredMessages,
     ensureClients,
     ensureEventStream,
     markAssistantCardsComplete,
+    replaceReasoningPartIDCache,
     replaceMessageState,
     refreshModelContextLimits,
     resetSessionTokenTracking,
@@ -3152,7 +2964,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     applyModelCatalogSnapshot,
     bootstrap.availableSessions,
     bootstrap.availableSessionsLoaded,
+    bootstrap.initialMatterId,
+    bootstrap.initialRawSessionId,
+    bootstrap.initialSessionRecordId,
     bootstrap.initialSessionSnapshot,
+    bootstrap.matterFileSummaryByMatterId,
+    bootstrap.matterSessionIdsByMatterId,
+    bootstrap.matters,
     loadSessionOptions,
     markAssistantCardsComplete,
     hydrateSessionFromBootstrap,
@@ -3162,6 +2980,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     resumeSession,
     bootstrap.modelCatalog,
     bootstrap.modelSelectionPolicy,
+    bootstrap.sessionFileSummaryByRawSessionId,
+    bootstrap.sessionRecordsByRawSessionId,
   ]);
 
   useEffect(() => {
@@ -3245,12 +3065,10 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       updated: Date.now(),
       created: Date.now(),
     };
-    appendTrace(`session created: ${createdSession.id}`);
     void loadSessionOptions();
 
     return createdSession.id;
   }, [
-    appendTrace,
     ensureClients,
     ensureEventStream,
     loadSessionOptions,
@@ -3311,12 +3129,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         displayPrompt,
         attachedFiles,
         uploadedFileLibraryBlock
-      );
-
-      appendTrace(
-        promptModel
-          ? `prompt sent (${runtimePrompt.length} chars) [model: ${currentModelKey}${promptVariant ? ` · ${promptVariant}` : ""}]`
-          : `prompt sent (${runtimePrompt.length} chars)`
       );
 
       const fail = (error: Error) => {
@@ -3389,7 +3201,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setAttachedFiles(attachedFiles);
       setErrorText(message);
       setIsBusy(false);
-      appendTrace(`prompt error: ${message}`);
 
       if (activeRunRef.current?.id === runID) {
         activeRunRef.current = null;
@@ -3399,8 +3210,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   }, [
     attachedFiles,
     appendUserCard,
-    appendTrace,
-    bootstrap.user.organisationName,
     currentModelKey,
     currentModelVariant,
     ensureSession,
@@ -3420,15 +3229,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setErrorText(null);
       try {
         await client.permission.reply({ requestID, reply });
-        appendTrace(`permission replied (${requestID}): ${reply}`);
         scheduleInteractiveRefresh(0);
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorText(message);
-        appendTrace(`permission reply error: ${message}`);
       }
     },
-    [appendTrace, scheduleInteractiveRefresh]
+    [scheduleInteractiveRefresh]
   );
 
   const updateQuestionDraft = useCallback(
@@ -3522,7 +3329,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           answers,
         });
 
-        appendTrace(`question replied (${request.id})`);
         setPendingQuestions((previous) =>
           previous.filter((pendingRequest) => pendingRequest.id !== request.id)
         );
@@ -3542,10 +3348,9 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorText(message);
-        appendTrace(`question reply error: ${message}`);
       }
     },
-    [appendTrace, questionDrafts, scheduleInteractiveRefresh]
+    [questionDrafts, scheduleInteractiveRefresh]
   );
 
   const resetSession = useCallback(() => {
@@ -3583,7 +3388,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       runCompletionInFlightRef.current = null;
 
       sdkClientRef.current = null;
-      configuredBaseURLRef.current = null;
 
       sessionIDRef.current = null;
       activeRunRef.current = null;
@@ -3608,7 +3412,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setSelectedVariantByModelKey(preferredVariantSelection);
       setIsFilesDialogOpen(false);
       setIsUploadingFiles(false);
-      setTraceLines([]);
       setErrorText(null);
       setPendingQuestions([]);
       setPendingPermissions([]);
@@ -3650,19 +3453,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     [sendPrompt]
   );
 
-  const canEditBaseUrl = !sessionID && !isBusy;
-  const basePort = (() => {
-    try {
-      const parsed = new URL(baseUrl);
-      if (parsed.port) return parsed.port;
-      if (parsed.protocol === "https:") return "443";
-      if (parsed.protocol === "http:") return "80";
-      return "-";
-    } catch {
-      const match = baseUrl.match(/:(\d+)(?:\/|$)/);
-      return match?.[1] ?? "-";
-    }
-  })();
   const modelLabel = currentModelKey
     ? selectableModelLabelByKey[currentModelKey] ?? currentModelKey
     : "-";
@@ -3801,13 +3591,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
   return (
     <main className="agent-page h-dvh overflow-hidden p-3 text-foreground sm:p-4">
-      <div
-        className={`agent-layout grid h-full gap-3 ${
-          showTrace
-            ? "lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_340px]"
-            : "lg:grid-cols-[auto_minmax(0,1fr)]"
-        }`}
-      >
+      <div className="agent-layout grid h-full gap-3 lg:grid-cols-[auto_minmax(0,1fr)]">
         <MatterChatSidebar
           canCreateChat={canCreateChat}
           isLoadingRecentChats={isLoadingSessionOptions}
@@ -3833,8 +3617,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
               availableSessions={availableSessions}
               isBusy={isBusy}
               selectedSessionID={selectedSessionID}
-              onToggleTrace={() => setShowTrace((value) => !value)}
-              showTrace={showTrace}
             />
 
             <div ref={timelineScrollAreaRef} className="min-h-0 flex-1 min-w-0">
@@ -3940,17 +3722,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           onSummaryChange={handleFilesSummaryChange}
           refreshToken={filesDialogRefreshToken}
         />
-
-        {showTrace ? (
-          <AgentTracePanel
-            basePort={basePort}
-            baseUrl={baseUrl}
-            canEditBaseUrl={canEditBaseUrl}
-            onBaseUrlChange={setBaseUrl}
-            onHide={() => setShowTrace(false)}
-            traceLines={traceLines}
-          />
-        ) : null}
       </div>
     </main>
   );

@@ -1,13 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { formatSessionOptionLabel } from "@/lib/agent-runtime/helpers";
 import type { SessionOption } from "@/lib/agent-runtime/types";
 
@@ -15,16 +8,12 @@ type AgentSessionHeaderProps = {
   availableSessions: Array<SessionOption>;
   isBusy: boolean;
   selectedSessionID: string;
-  onToggleTrace: () => void;
-  showTrace: boolean;
 };
 
 export function AgentSessionHeader({
   availableSessions,
   isBusy,
   selectedSessionID,
-  onToggleTrace,
-  showTrace,
 }: AgentSessionHeaderProps) {
   const selectedSession = availableSessions.find((session) => session.id === selectedSessionID);
   const sessionLabel = selectedSession
@@ -47,29 +36,6 @@ export function AgentSessionHeader({
       >
         {isBusy ? "Running" : "Ready"}
       </Badge>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            className="agent-btn rounded-none border-2 shadow-none"
-          >
-            More
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="agent-menu rounded-none border-2 border-(--border) bg-(--surface-light)"
-        >
-          <DropdownMenuItem
-            className="agent-menu-item cursor-pointer rounded-none hover:bg-(--brand-soft) hover:text-foreground focus:bg-(--brand-soft) focus:text-foreground data-highlighted:bg-(--brand-soft) data-highlighted:text-foreground"
-            onSelect={onToggleTrace}
-          >
-            {showTrace ? "Hide Trace" : "Show Trace"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   );
 }
