@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
-import { AuthPromoImage } from "@/components/auth/auth-promo-image";
 import { Spinner } from "@/components/loaders/spinner";
 import { Label } from "@/components/ui/label";
 
@@ -74,13 +74,16 @@ export default function Ms365AllowlistPage() {
 
   return (
     <div className="auth-page flex min-h-dvh">
-      <div className="grid w-full grid-rows-[auto_1fr] px-8 py-10 md:w-1/2 md:px-16 lg:px-24">
-        <div className="heading-serif text-sm tracking-widest text-(--ink-soft)">
+      <div className="grid w-full grid-rows-[auto_1fr] px-8 py-10 md:px-16 lg:px-24">
+        <Link
+          href="/agent"
+          className="heading-serif text-sm tracking-widest text-(--ink-soft) transition-colors hover:text-foreground"
+        >
           LNP Agent
-        </div>
+        </Link>
 
         <div className="flex items-center">
-          <div className="mx-auto w-full max-w-sm">
+          <div className="mx-auto w-full max-w-3xl">
             <h1 className="heading-serif text-2xl">MS365 Allowlist</h1>
             <p className="mt-2 text-sm text-(--ink-muted)">
               Add a SharePoint location to the Microsoft 365 browser.
@@ -100,7 +103,7 @@ export default function Ms365AllowlistPage() {
             </div>
           ) : null}
 
-            <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5">
+            <form onSubmit={handleSubmit} autoComplete="off" className="mt-8 flex flex-col gap-5">
               <div className="flex flex-col gap-1.5">
                 <Label
                   htmlFor="url"
@@ -126,9 +129,18 @@ export default function Ms365AllowlistPage() {
                 </Label>
                 <input
                   id="admin-password"
-                  type="password"
+                  name="admin-access-code"
+                  type="text"
+                  inputMode="text"
                   value={adminPassword}
                   onChange={(event) => setAdminPassword(event.target.value)}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  style={{ WebkitTextSecurity: "disc" }}
                   className="app-field h-10 w-full border-2 px-3 text-sm outline-none"
                 />
               </div>
@@ -151,8 +163,6 @@ export default function Ms365AllowlistPage() {
           </div>
         </div>
       </div>
-
-      <AuthPromoImage />
     </div>
   );
 }

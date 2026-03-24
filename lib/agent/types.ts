@@ -35,11 +35,27 @@ export type AgentBootstrapUser = {
   organisationName: string;
 };
 
+export type AgentSelectableModel = {
+  key: string;
+  providerID: string;
+  modelID: string;
+  label: string;
+};
+
+export type AgentModelSelectionPolicy = {
+  allowedModelKeys: Array<string>;
+  defaultModelKey: string | null;
+  defaultVariant: string | null;
+};
+
 export type AgentBootstrapModelCatalog = {
   loaded: boolean;
   contextLimits: Record<string, number>;
   costs: Record<string, ModelCostInfo>;
   variants: Record<string, string[]>;
+  selectableModels: Array<AgentSelectableModel>;
+  defaultModelKey: string | null;
+  preferredVariantByModelKey: Record<string, string>;
 };
 
 export type AgentBootstrapSessionSnapshot = {
@@ -55,6 +71,7 @@ export type AgentBootstrap = {
   availableSessions: Array<SessionOption>;
   availableSessionsLoaded: boolean;
   modelCatalog: AgentBootstrapModelCatalog;
+  modelSelectionPolicy: AgentModelSelectionPolicy | null;
   matterFileSummaryByMatterId: Record<string, StoredFileSummary>;
   matterSessionIdsByMatterId: Record<string, string[]>;
   sessionFileSummaryByRawSessionId: Record<string, StoredFileSummary>;

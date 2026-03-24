@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
-  ArrowRight,
   ChevronDown,
   CircleHelp,
   FileText,
@@ -248,7 +247,7 @@ function SidebarBody({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const activeSidebarItemID = activeSessionRecordID || activeMatterID;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeSidebarItemID) return;
     if (!rootRef.current || rootRef.current.getClientRects().length === 0) return;
 
@@ -256,9 +255,14 @@ function SidebarBody({
       const viewport = rootRef.current?.querySelector(
         '[data-slot="scroll-area-viewport"]'
       ) as HTMLDivElement | null;
-      const activeRow = rootRef.current?.querySelector(
-        '[data-active-sidebar-item="true"]'
+      const activeSessionRow = rootRef.current?.querySelector(
+        '[data-active-sidebar-session="true"]'
       ) as HTMLDivElement | null;
+      const activeRow =
+        activeSessionRow ??
+        (rootRef.current?.querySelector(
+        '[data-active-sidebar-item="true"]'
+        ) as HTMLDivElement | null);
 
       if (!viewport || !activeRow) return;
 
@@ -280,7 +284,7 @@ function SidebarBody({
     return () => {
       window.cancelAnimationFrame(frameID);
     };
-  }, [activeSidebarItemID]);
+  }, [activeSidebarItemID, expandedMatters]);
 
   return (
     <div
@@ -333,6 +337,36 @@ function SidebarBody({
         </div>
       </div>
 
+      {/* ── Chats / Matters tab switcher ───────────────────── */}
+      <div className="grid shrink-0 grid-cols-2 border-b-2 border-(--border)">
+        <button
+          type="button"
+          onClick={onOpenChatsWorkspace}
+          className={`flex items-center justify-center gap-1.5 border-r-2 border-(--border) py-2 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+            workspaceMode === "chats"
+              ? "bg-(--brand) text-(--brand-on)"
+              : "text-(--ink-soft) hover:bg-(--surface-hover) hover:text-foreground"
+          }`}
+          aria-current={workspaceMode === "chats" ? "page" : undefined}
+        >
+          <MessageSquareText className="size-3.5" />
+          Chats
+        </button>
+        <button
+          type="button"
+          onClick={onOpenMattersWorkspace}
+          className={`flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+            workspaceMode === "matters"
+              ? "bg-(--brand) text-(--brand-on)"
+              : "text-(--ink-soft) hover:bg-(--surface-hover) hover:text-foreground"
+          }`}
+          aria-current={workspaceMode === "matters" ? "page" : undefined}
+        >
+          <Folder className="size-3.5" />
+          Matters
+        </button>
+      </div>
+
       <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:block! [&>[data-slot=scroll-area-viewport]>div]:min-w-0 [&>[data-slot=scroll-area-viewport]>div]:w-full">
         <div className="min-w-0 w-full space-y-5 px-3 py-3">
           {workspaceMode === "chats" ? (
@@ -341,15 +375,6 @@ function SidebarBody({
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
                   Recent chats
                 </p>
-                <button
-                  type="button"
-                  onClick={onOpenMattersWorkspace}
-                  className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft) transition-colors hover:text-foreground"
-                  aria-label="Open matters workspace"
-                >
-                  Matters
-                  <ArrowRight className="size-3.5" />
-                </button>
               </div>
               {isLoadingRecentChats && recentChats.length === 0 ? (
                 <RecentChatsLoader />
@@ -402,19 +427,10 @@ function SidebarBody({
 
           {workspaceMode === "matters" ? (
             <section className="space-y-2">
-              <div className="flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2 px-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
                   Matter folders
                 </p>
-                <button
-                  type="button"
-                  onClick={onOpenChatsWorkspace}
-                  className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft) transition-colors hover:text-foreground"
-                  aria-label="Open chats workspace"
-                >
-                  Chats
-                  <ArrowRight className="size-3.5" />
-                </button>
               </div>
 
               {matters.length > 0 ? (

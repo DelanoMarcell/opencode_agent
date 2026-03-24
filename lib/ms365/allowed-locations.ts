@@ -32,7 +32,7 @@ function serializeAllowedLocation(location: {
 }
 
 export function getMs365AllowlistAdminPassword() {
-  return requireEnv("MS365_ALLOWLIST_ADMIN_PASSWORD");
+  return requireEnv("ADMIN_ALLOWLIST_PASSWORD");
 }
 
 export async function listAllowedMs365Locations(

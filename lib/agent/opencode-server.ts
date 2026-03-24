@@ -10,6 +10,7 @@ import {
 } from "@/lib/agent/model-catalog";
 import type {
   AgentBootstrapModelCatalog,
+  AgentModelSelectionPolicy,
   AgentBootstrapSessionSnapshot,
 } from "@/lib/agent/types";
 
@@ -24,14 +25,55 @@ function createServerOpencodeClient() {
   });
 }
 
+function getOpencodeErrorMessage(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "data" in error &&
+    error.data &&
+    typeof error.data === "object" &&
+    "message" in error.data &&
+    typeof error.data.message === "string"
+  ) {
+    return error.data.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Failed to load OpenCode provider metadata";
+}
+
+export async function fetchOpenCodeProviderCatalog(): Promise<{
+  providers: Array<ProviderCatalogListItem>;
+  connectedProviderIDs: Array<string>;
+  defaultModelIDs: Record<string, string>;
+}> {
+  const client = createServerOpencodeClient();
+  const result = await client.provider.list();
+
+  if (result.error) {
+    throw new Error(getOpencodeErrorMessage(result.error));
+  }
+
+  return {
+    providers: (result.data?.all ?? []) as Array<ProviderCatalogListItem>,
+    connectedProviderIDs: result.data?.connected ?? [],
+    defaultModelIDs: result.data?.default ?? {},
+  };
+}
+
 type FetchOpenCodeBootstrapOptions = {
   initialRawSessionId?: string;
   visibleRawSessionIds: Set<string>;
+  modelSelectionPolicy?: AgentModelSelectionPolicy | null;
 };
 
 export async function fetchOpenCodeBootstrap({
   initialRawSessionId,
   visibleRawSessionIds,
+  modelSelectionPolicy,
 }: FetchOpenCodeBootstrapOptions): Promise<{
   availableSessions: Array<SessionOption>;
   availableSessionsLoaded: boolean;
@@ -41,7 +83,7 @@ export async function fetchOpenCodeBootstrap({
   const client = createServerOpencodeClient();
 
   const [providerResult, sessionsResult, messagesResult, statusResult] = await Promise.all([
-    client.provider.list().catch((error) => ({ transportError: error } as const)),
+    fetchOpenCodeProviderCatalog().catch((error) => ({ transportError: error } as const)),
     client.session.list().catch((error) => ({ transportError: error } as const)),
     initialRawSessionId
       ? client.session
@@ -57,13 +99,21 @@ export async function fetchOpenCodeBootstrap({
   ]);
 
   const modelCatalog =
-    providerResult && "data" in providerResult && !providerResult.error
-      ? buildAgentModelCatalog((providerResult.data?.all ?? []) as Array<ProviderCatalogListItem>)
+    providerResult && "providers" in providerResult
+      ? buildAgentModelCatalog({
+          providers: providerResult.providers,
+          connectedProviderIDs: providerResult.connectedProviderIDs,
+          defaultModelIDs: providerResult.defaultModelIDs,
+          policy: modelSelectionPolicy,
+        })
       : {
           loaded: false,
           contextLimits: {},
           costs: {},
           variants: {},
+          selectableModels: [],
+          defaultModelKey: null,
+          preferredVariantByModelKey: {},
         };
 
   const availableSessions =

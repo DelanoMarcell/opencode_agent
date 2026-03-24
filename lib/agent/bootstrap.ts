@@ -10,6 +10,7 @@ import { MatterSession } from "@/lib/models/matter-session";
 import { OpencodeSession } from "@/lib/models/opencode-session";
 import { SessionFile } from "@/lib/models/session-file";
 import type { StoredFileSummary } from "@/lib/files/types";
+import { getOrganisationModelSelectionPolicy } from "@/lib/agent/model-allowlist";
 import { fetchOpenCodeBootstrap } from "@/lib/agent/opencode-server";
 import type {
   AgentBootstrap,
@@ -218,9 +219,11 @@ async function buildWorkspaceBootstrap(
     workspaceMode === "chats"
       ? buildChatsWorkspaceData(await loadAccessibleAgentWorkspaceData(user))
       : buildMattersWorkspaceData(await loadAccessibleAgentWorkspaceData(user));
+  const modelSelectionPolicy = await getOrganisationModelSelectionPolicy(user.organisationId);
 
   const openCodeBootstrap = await fetchOpenCodeBootstrap({
     initialRawSessionId: options.initialRawSessionId,
+    modelSelectionPolicy,
     visibleRawSessionIds: new Set(Object.keys(workspaceData.sessionRecordsByRawSessionId)),
   });
 
@@ -231,6 +234,7 @@ async function buildWorkspaceBootstrap(
     availableSessions: openCodeBootstrap.availableSessions,
     availableSessionsLoaded: openCodeBootstrap.availableSessionsLoaded,
     modelCatalog: openCodeBootstrap.modelCatalog,
+    modelSelectionPolicy,
     matterFileSummaryByMatterId: workspaceData.matterFileSummaryByMatterId,
     matterSessionIdsByMatterId: workspaceData.matterSessionIdsByMatterId,
     sessionFileSummaryByRawSessionId: workspaceData.sessionFileSummaryByRawSessionId,

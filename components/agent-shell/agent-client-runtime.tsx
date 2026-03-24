@@ -94,6 +94,8 @@ import type {
 import type {
   AgentBootstrap,
   AgentBootstrapMatter,
+  AgentModelSelectionPolicy,
+  AgentSelectableModel,
   AgentBootstrapSessionRecord,
 } from "@/lib/agent/types";
 import type {
@@ -407,6 +409,44 @@ function resolveStoredModelSelectionState(storedMessages: Array<StoredMessage>):
   };
 }
 
+function resolvePreferredSelectableModelKey(input: {
+  selectableModels: Array<AgentSelectableModel>;
+  defaultModelKey: string | null;
+}): string | null {
+  const selectableModelKeySet = new Set(input.selectableModels.map((model) => model.key));
+
+  if (input.defaultModelKey && selectableModelKeySet.has(input.defaultModelKey)) {
+    return input.defaultModelKey;
+  }
+
+  return input.selectableModels[0]?.key ?? null;
+}
+
+function buildPreferredVariantSelection(
+  variantsByModelKey: Record<string, string[]>,
+  preferredVariantByModelKey: Record<string, string>
+) {
+  const next: Record<string, string> = {};
+
+  for (const [modelKey, variant] of Object.entries(preferredVariantByModelKey)) {
+    if (variantsByModelKey[modelKey]?.includes(variant)) {
+      next[modelKey] = variant;
+    }
+  }
+
+  return next;
+}
+
+function mergeVariantSelectionState(input: {
+  storedSelection: Record<string, string>;
+  preferredSelection: Record<string, string>;
+}) {
+  return {
+    ...input.preferredSelection,
+    ...input.storedSelection,
+  };
+}
+
 function buildBootstrapSessionState(bootstrap: AgentBootstrap): {
   isHydrated: boolean;
   messages: Array<MessageEntry>;
@@ -450,9 +490,19 @@ function isAbortError(error: unknown): boolean {
 
 export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProps) {
   const bootstrapSessionState = buildBootstrapSessionState(bootstrap);
+  const bootstrapPreferredVariantSelection = buildPreferredVariantSelection(
+    bootstrap.modelCatalog.variants,
+    bootstrap.modelCatalog.preferredVariantByModelKey
+  );
   const initialModelSelectionState = resolveStoredModelSelectionState(
     bootstrapSessionState.storedMessages
   );
+  const initialSelectableModelKey =
+    initialModelSelectionState.selectedModelKey ??
+    resolvePreferredSelectableModelKey({
+      selectableModels: bootstrap.modelCatalog.selectableModels,
+      defaultModelKey: bootstrap.modelCatalog.defaultModelKey,
+    });
   const pathname = usePathname();
   const router = useRouter();
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
@@ -465,11 +515,23 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   const [availableModelVariantsByKey, setAvailableModelVariantsByKey] = useState<
     Record<string, string[]>
   >(bootstrap.modelCatalog.variants);
+  const [availableSelectableModels, setAvailableSelectableModels] = useState<
+    Array<AgentSelectableModel>
+  >(bootstrap.modelCatalog.selectableModels);
+  const [defaultSelectableModelKey, setDefaultSelectableModelKey] = useState<string | null>(
+    bootstrap.modelCatalog.defaultModelKey
+  );
+  const [modelSelectionPolicy, setModelSelectionPolicy] = useState<AgentModelSelectionPolicy | null>(
+    bootstrap.modelSelectionPolicy
+  );
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(
-    initialModelSelectionState.selectedModelKey
+    initialSelectableModelKey
   );
   const [selectedVariantByModelKey, setSelectedVariantByModelKey] = useState<Record<string, string>>(
-    initialModelSelectionState.selectedVariantByModelKey
+    mergeVariantSelectionState({
+      storedSelection: initialModelSelectionState.selectedVariantByModelKey,
+      preferredSelection: bootstrapPreferredVariantSelection,
+    })
   );
   const [matterFileSummaryByMatterId, setMatterFileSummaryByMatterId] = useState(
     bootstrap.matterFileSummaryByMatterId
@@ -603,6 +665,29 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   useEffect(() => {
     isBusyRef.current = isBusy;
   }, [isBusy]);
+
+  useEffect(() => {
+    if (selectedSessionID) return;
+
+    const selectableModelKeySet = new Set(availableSelectableModels.map((model) => model.key));
+    if (selectedModelKey && selectableModelKeySet.has(selectedModelKey)) {
+      return;
+    }
+
+    const nextModelKey = resolvePreferredSelectableModelKey({
+      selectableModels: availableSelectableModels,
+      defaultModelKey: defaultSelectableModelKey,
+    });
+
+    if (nextModelKey !== selectedModelKey) {
+      setSelectedModelKey(nextModelKey);
+    }
+  }, [
+    availableSelectableModels,
+    defaultSelectableModelKey,
+    selectedModelKey,
+    selectedSessionID,
+  ]);
 
   useEffect(() => {
     let timeoutID: number | null = null;
@@ -1028,6 +1113,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         new Map<string, ModelCostInfo>(Object.entries(catalog.costs))
       );
       setAvailableModelVariantsByKey(catalog.variants);
+      setAvailableSelectableModels(catalog.selectableModels);
+      setDefaultSelectableModelKey(catalog.defaultModelKey);
       return true;
     },
     [replaceModelCatalog]
@@ -1047,26 +1134,46 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       }
 
       const nextCatalog = buildAgentModelCatalog(
-        (result.data?.all ?? []) as Array<ProviderCatalogListItem>
+        {
+          providers: (result.data?.all ?? []) as Array<ProviderCatalogListItem>,
+          connectedProviderIDs: result.data?.connected ?? [],
+          defaultModelIDs: result.data?.default ?? {},
+          policy: modelSelectionPolicy,
+        }
       );
       const nextLimits = new Map<string, number>(Object.entries(nextCatalog.contextLimits));
       const nextCosts = new Map<string, ModelCostInfo>(Object.entries(nextCatalog.costs));
       replaceModelCatalog(nextLimits, nextCosts);
       setAvailableModelVariantsByKey(nextCatalog.variants);
+      setAvailableSelectableModels(nextCatalog.selectableModels);
+      setDefaultSelectableModelKey(nextCatalog.defaultModelKey);
     } catch (error) {
       appendTrace(`provider metadata error: ${toErrorMessage(error)}`);
     }
-  }, [appendTrace, ensureClients, replaceModelCatalog]);
+  }, [appendTrace, ensureClients, modelSelectionPolicy, replaceModelCatalog]);
 
   const syncModelSelectionFromStoredMessages = useCallback(
     (storedMessages: Array<StoredMessage>) => {
       const latestUserSelection = getLatestUserModelSelection(storedMessages);
       const fallbackModelKey = getLatestAssistantModelLabel(storedMessages) ?? null;
-      const nextModelKey = latestUserSelection.modelKey ?? fallbackModelKey;
+      const preferredVariantSelection = buildPreferredVariantSelection(
+        availableModelVariantsByKey,
+        bootstrap.modelCatalog.preferredVariantByModelKey
+      );
+      const nextModelKey =
+        latestUserSelection.modelKey ??
+        fallbackModelKey ??
+        resolvePreferredSelectableModelKey({
+          selectableModels: availableSelectableModels,
+          defaultModelKey: defaultSelectableModelKey,
+        });
 
       setSelectedModelKey(nextModelKey);
       setSelectedVariantByModelKey((current) => {
-        const next = { ...current };
+        const next = mergeVariantSelectionState({
+          storedSelection: current,
+          preferredSelection: preferredVariantSelection,
+        });
 
         if (latestUserSelection.modelKey) {
           if (latestUserSelection.variant) {
@@ -1079,7 +1186,12 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
         return next;
       });
     },
-    []
+    [
+      availableModelVariantsByKey,
+      availableSelectableModels,
+      bootstrap.modelCatalog.preferredVariantByModelKey,
+      defaultSelectableModelKey,
+    ]
   );
 
   const refreshPendingInteractiveRequests = useCallback(async () => {
@@ -2356,6 +2468,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const currentModelKey = selectedModelKey ?? activeModelKey ?? null;
+  const selectableModelLabelByKey = useMemo(
+    () =>
+      Object.fromEntries(
+        availableSelectableModels.map((model) => [model.key, model.label] as const)
+      ),
+    [availableSelectableModels]
+  );
   const availableModelVariants = currentModelKey
     ? availableModelVariantsByKey[currentModelKey] ?? []
     : [];
@@ -2364,6 +2483,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     const candidate = selectedVariantByModelKey[currentModelKey];
     return candidate && availableModelVariants.includes(candidate) ? candidate : null;
   })();
+
+  const handleSelectModel = useCallback(
+    (modelKey: string) => {
+      setSelectedModelKey(modelKey);
+      appendTrace(`model selected: ${modelKey}`);
+    },
+    [appendTrace]
+  );
 
   const handleSelectModelVariant = useCallback(
     (variant: string | null) => {
@@ -2877,6 +3004,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     const bootstrapModelSelectionState = resolveStoredModelSelectionState(
       bootstrap.initialSessionSnapshot?.storedMessages ?? []
     );
+    const preferredVariantSelection = buildPreferredVariantSelection(
+      bootstrap.modelCatalog.variants,
+      bootstrap.modelCatalog.preferredVariantByModelKey
+    );
+    const nextSelectedModelKey =
+      bootstrapModelSelectionState.selectedModelKey ??
+      resolvePreferredSelectableModelKey({
+        selectableModels: bootstrap.modelCatalog.selectableModels,
+        defaultModelKey: bootstrap.modelCatalog.defaultModelKey,
+      });
 
     setSelectedMatterID(bootstrap.initialMatterId ?? "");
     setSelectedSessionRecordID(bootstrap.initialSessionRecordId ?? "");
@@ -2888,8 +3025,14 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     setMatterSessionIdsByMatterId(bootstrap.matterSessionIdsByMatterId);
     setAvailableSessions(bootstrap.availableSessions);
     setAttachedFiles([]);
-    setSelectedModelKey(bootstrapModelSelectionState.selectedModelKey);
-    setSelectedVariantByModelKey(bootstrapModelSelectionState.selectedVariantByModelKey);
+    setSelectedModelKey(nextSelectedModelKey);
+    setSelectedVariantByModelKey(
+      mergeVariantSelectionState({
+        storedSelection: bootstrapModelSelectionState.selectedVariantByModelKey,
+        preferredSelection: preferredVariantSelection,
+      })
+    );
+    setModelSelectionPolicy(bootstrap.modelSelectionPolicy);
     setIsFilesDialogOpen(false);
     pendingSidebarSessionRef.current = null;
     setIsLoadingSessionOptions(!bootstrap.availableSessionsLoaded);
@@ -2939,8 +3082,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setTimeline([]);
       setIsBusy(false);
       setRunUiPhase("thinking");
-      setSelectedModelKey(null);
-      setSelectedVariantByModelKey({});
       setPendingQuestions([]);
       setPendingPermissions([]);
       setQuestionDrafts({});
@@ -2960,6 +3101,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     routeSyncKey,
     resumeSession,
     bootstrap.modelCatalog,
+    bootstrap.modelSelectionPolicy,
   ]);
 
   useEffect(() => {
@@ -3334,6 +3476,15 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
   );
 
   const resetSession = useCallback(() => {
+      const nextSelectedModelKey = resolvePreferredSelectableModelKey({
+        selectableModels: availableSelectableModels,
+        defaultModelKey: defaultSelectableModelKey,
+      });
+      const preferredVariantSelection = buildPreferredVariantSelection(
+        availableModelVariantsByKey,
+        bootstrap.modelCatalog.preferredVariantByModelKey
+      );
+
       eventStreamSupervisorAbortRef.current?.abort();
       eventStreamSupervisorAbortRef.current = null;
       eventStreamAbortRef.current?.abort();
@@ -3380,8 +3531,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       setTimeline([]);
       setInputText("");
       setAttachedFiles([]);
-      setSelectedModelKey(null);
-      setSelectedVariantByModelKey({});
+      setSelectedModelKey(nextSelectedModelKey);
+      setSelectedVariantByModelKey(preferredVariantSelection);
       setIsFilesDialogOpen(false);
       setIsUploadingFiles(false);
       setTraceLines([]);
@@ -3400,7 +3551,17 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
           ? "/agent/matters"
           : "/agent";
       router.push(targetRoute);
-  }, [loadSessionOptions, resetSessionTokenTracking, router, selectedMatterID, workspaceMode]);
+  }, [
+    availableModelVariantsByKey,
+    availableSelectableModels,
+    bootstrap.modelCatalog.preferredVariantByModelKey,
+    defaultSelectableModelKey,
+    loadSessionOptions,
+    resetSessionTokenTracking,
+    router,
+    selectedMatterID,
+    workspaceMode,
+  ]);
 
   const handleCreateChat = useCallback(() => {
     if (workspaceMode === "matters" && !selectedMatterID) return;
@@ -3429,7 +3590,13 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return match?.[1] ?? "-";
     }
   })();
-  const modelLabel = currentModelKey ?? "-";
+  const modelLabel = currentModelKey
+    ? selectableModelLabelByKey[currentModelKey] ?? currentModelKey
+    : "-";
+  const currentSelectableModelKey =
+    currentModelKey && availableSelectableModels.some((model) => model.key === currentModelKey)
+      ? currentModelKey
+      : null;
   const modelVariantLabel = currentModelKey ? currentModelVariant ?? "default" : "-";
   const contextUsedEstimate = latestContextUsage ? getTokenUsageTotal(latestContextUsage) : 0;
   const contextUsagePercent =
@@ -3630,7 +3797,16 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
 
           <AgentComposer
             attachedFiles={attachedFiles}
+            availableModels={availableSelectableModels.map((model) => ({
+              key: model.key,
+              label: model.label,
+            }))}
             availableModelVariants={availableModelVariants}
+            canSelectModel={
+              availableSelectableModels.length > 0 &&
+              !isBusy &&
+              !isLoadingSelectedSession
+            }
             canSelectModelVariant={
               Boolean(currentModelKey) &&
               availableModelVariants.length > 0 &&
@@ -3641,6 +3817,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             canManageFiles={Boolean(currentFilesResourceId)}
             contextBreakdownRows={contextBreakdownRows}
             contextUsageText={contextUsageText}
+            currentModelSelectionKey={currentSelectableModelKey}
             currentModelVariantLabel={modelVariantLabel}
             filesScopeLabel={activeFilesScope}
             inputText={inputText}
@@ -3655,6 +3832,7 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
             onOpenFiles={handleOpenFiles}
             onKeyDown={handleComposerKeyDown}
             onRemoveAttachedFile={handleRemoveAttachedFile}
+            onSelectModel={handleSelectModel}
             onSelectModelVariant={handleSelectModelVariant}
             onSend={() => void sendPrompt()}
             sendDisabled={
