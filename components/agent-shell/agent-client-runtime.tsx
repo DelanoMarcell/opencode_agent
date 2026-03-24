@@ -611,7 +611,6 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
     modelCostByKeyRef,
     rebuildSessionUsageFromStoredMessages,
     replaceModelCatalog,
-    resetModelCatalog,
     resetSessionTokenTracking,
     sessionSpendTotal,
     sessionUsageTotals,
@@ -1090,9 +1089,8 @@ export default function AgentClientRuntime({ bootstrap }: AgentClientRuntimeProp
       return;
     }
 
-    resetModelCatalog();
     sdkClientRef.current = createOpencodeClient({ baseUrl: DEFAULT_BASE_URL });
-  }, [resetModelCatalog]);
+  }, []);
 
   const applyModelCatalogSnapshot = useCallback(
     (catalog: AgentBootstrap["modelCatalog"]) => {
